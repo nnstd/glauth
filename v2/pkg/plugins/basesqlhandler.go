@@ -250,24 +250,39 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 			h.log.Debug().Str("query", query).Int("userid", user.UIDNumber).Msg("FindUser capabilities query")
 
 			if !h.cfg.Behaviors.IgnoreCapabilities {
+				h.log.Debug().Msg("not ignoring capabilities in basesqlhandler FindUser capabilities")
+
 				capability := config.Capability{}
 				rows, err := h.database.cnx.QueryContext(ctx, query, user.UIDNumber)
 
 				if err == nil {
 					for rows.Next() {
+						h.log.Debug().Msg("basesqlhandler FindUser capabilities rows.Next()")
+
 						err := rows.Scan(&capability.Action, &capability.Object)
+
 						if err == nil {
+							h.log.Debug().Str("action", capability.Action).Str("object", capability.Object).Msg("basesqlhandler FindUser appending capabilities rows.Scan()")
+
 							user.Capabilities = append(user.Capabilities, capability)
+						} else {
+							h.log.Error().Err(err).Msg("basesqlhandler FindUser capabilities rows.Scan() error")
 						}
 					}
+				} else {
+					h.log.Error().Err(err).Msg("basesqlhandler FindUser capabilities query error")
 				}
-				
+
 				defer rows.Close()
+			} else {
+				h.log.Debug().Msg("ignoring capabilities in basesqlhandler FindUser capabilities")
 			}
 		}
 	} else {
 		h.log.Error().Str("username", userName).Err(err).Msg("FindUser error")
 	}
+
+	h.log.Debug().Int("numCapabilities", len(user.Capabilities)).Msg("basesqlhandler FindUser capabilities")
 
 	return found, user, err
 }
@@ -330,7 +345,7 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 		if err != nil {
 			return entries, err
 		}
-		
+
 		// Convert sql.NullString to regular strings
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String
@@ -553,7 +568,7 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 		if err != nil {
 			return []string{}
 		}
-		
+
 		// Convert sql.NullString to regular strings
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String
@@ -630,7 +645,7 @@ func (h databaseHandler) getGroupMemberIDs(ctx context.Context, gid int) []strin
 		if err != nil {
 			return []string{}
 		}
-		
+
 		// Convert sql.NullString to regular strings
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String

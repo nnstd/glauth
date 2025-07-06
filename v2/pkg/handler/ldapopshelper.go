@@ -324,6 +324,7 @@ func (l LDAPOpsHelper) searchCheckBindDN(ctx context.Context, h LDAPOpsHandler, 
 
 	boundUser, ldapcode := l.findUser(ctx, h, bindDN, false /* checkGroup */)
 	if ldapcode != ldap.LDAPResultSuccess {
+		h.GetLog().Debug().Msg("searchCheckBindDN failed")
 		return "", nil, ldapcode
 	}
 
@@ -660,9 +661,12 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 			// h.GetLog().Warning(fmt.Sprintf("Bind Error: BindDN %s not our BaseDN %s", bindDN, baseDN))
 			return nil, ldap.LDAPResultInvalidCredentials
 		}
+
 		parts := strings.Split(strings.TrimSuffix(bindDN, baseDN), ",")
+
 		groupName := ""
 		userName := ""
+
 		if len(parts) == 1 {
 			userName = strings.TrimPrefix(parts[0], h.GetBackend().NameFormatAsArray[0]+"=")
 		} else if len(parts) == 2 || (len(parts) == 3 && parts[2] == "ou=users") {
@@ -685,7 +689,7 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 			return nil, ldap.LDAPResultInvalidCredentials
 		}
 
-		h.GetLog().Debug().Int("numCapabilities", len(user.Capabilities)).Msg("FindUser capabilities")
+		h.GetLog().Debug().Int("numCapabilities", len(user.Capabilities)).Msg("FindUser in findUser capabilities")
 
 		if checkGroup {
 			// find the group
