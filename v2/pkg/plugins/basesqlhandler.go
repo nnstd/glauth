@@ -49,11 +49,14 @@ type databaseHandler struct {
 	log         *zerolog.Logger
 	cfg         *config.Config
 	yubikeyAuth *yubigo.YubiAuth
-	sqlBackend  SqlBackend
-	database    database
-	MemGroups   []config.Group
-	ldohelper   handler.LDAPOpsHelper
-	attmatcher  *regexp.Regexp
+
+	sqlBackend     SqlBackend
+	preparedSymbol string
+
+	database   database
+	MemGroups  []config.Group
+	ldohelper  handler.LDAPOpsHelper
+	attmatcher *regexp.Regexp
 
 	tracer trace.Tracer
 }
@@ -98,6 +101,8 @@ func NewDatabaseHandler(sqlBackend SqlBackend, opts ...handler.Option) handler.H
 
 	sqlBackend.CreateSchema(db)
 	sqlBackend.MigrateSchema(db, ColumnExists)
+
+	handler.preparedSymbol = sqlBackend.GetPrepareSymbol()
 
 	options.Logger.Debug().Msg("Database (" + sqlBackend.GetDriverName() + "::" + options.Backend.Database + ") Plugin: Ready")
 
@@ -189,27 +194,50 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 	user := config.User{}
 	found := false
 
+	query := fmt.Sprintf(`
+		SELECT u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.disabled
+		FROM users u WHERE %s=%s`,
+		criterion,
+		h.preparedSymbol,
+	)
+
+	h.log.Debug().Str("query", query).Str("username", userName).Msg("FindUser query")
+
 	var disabled int
 	err = h.database.cnx.QueryRowContext(
 		ctx,
-		fmt.Sprintf(`
-			SELECT u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.disabled
-			FROM users u WHERE %s=%s`,
-			criterion,
-			h.sqlBackend.GetPrepareSymbol(),
-		), userName).Scan(
-		&user.UIDNumber, &user.PrimaryGroup, &user.PassBcrypt, &user.PassSHA256, &user.OTPSecret, &user.Yubikey, &disabled)
+		query,
+		userName,
+	).Scan(
+		&user.UIDNumber,
+		&user.PrimaryGroup,
+		&user.PassBcrypt,
+		&user.PassSHA256,
+		&user.OTPSecret,
+		&user.Yubikey,
+		&disabled,
+	)
+
+	h.log.Debug().Any("user", user).Int("disabled", disabled).Msg("FindUser scan")
+
 	if err == nil {
 		user.Disabled = h.intToBool(disabled)
+
 		if !user.Disabled {
 			found = true
 
-			if !h.cfg.Behaviors.IgnoreCapabilities {
-				capability := config.Capability{}
-				rows, err := h.database.cnx.QueryContext(ctx, fmt.Sprintf(`
+			query := fmt.Sprintf(`
 				SELECT c.action,c.object
 				FROM capabilities c WHERE userid=%s`,
-					h.sqlBackend.GetPrepareSymbol()), user.UIDNumber)
+				h.preparedSymbol,
+			)
+
+			h.log.Debug().Str("query", query).Int("userid", user.UIDNumber).Msg("FindUser capabilities query")
+
+			if !h.cfg.Behaviors.IgnoreCapabilities {
+				capability := config.Capability{}
+				rows, err := h.database.cnx.QueryContext(ctx, query, user.UIDNumber)
+
 				if err == nil {
 					for rows.Next() {
 						err := rows.Scan(&capability.Action, &capability.Object)
@@ -221,6 +249,8 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 				defer rows.Close()
 			}
 		}
+	} else {
+		h.log.Error().Str("username", userName).Err(err).Msg("FindUser error")
 	}
 
 	return found, user, err
@@ -233,11 +263,19 @@ func (h databaseHandler) FindGroup(ctx context.Context, groupName string) (f boo
 	group := config.Group{}
 	found := false
 
+	query := fmt.Sprintf(`
+		SELECT g.gidnumber FROM ldapgroups g WHERE lower(name)=%s`,
+		h.preparedSymbol,
+	)
+
+	h.log.Debug().Str("query", query).Str("groupName", groupName).Msg("FindGroup query")
+
 	err = h.database.cnx.QueryRowContext(
 		ctx,
-		fmt.Sprintf(`
-			SELECT g.gidnumber FROM ldapgroups g WHERE lower(name)=%s`, h.sqlBackend.GetPrepareSymbol()), groupName).Scan(
-		&group.GIDNumber)
+		query,
+		groupName,
+	).Scan(&group.GIDNumber)
+
 	if err == nil {
 		found = true
 	}
@@ -258,8 +296,7 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
-		`
-		SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr  
+		`SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr  
 		FROM users u`)
 	if err != nil {
 		return entries, err
@@ -344,14 +381,11 @@ func (h databaseHandler) Close(boundDn string, conn net.Conn) error {
 }
 
 func (h databaseHandler) intToBool(value int) bool {
-	if value == 0 {
-		return false
-	}
-	return true
+	return value != 0
 }
 
 func (h databaseHandler) commaListToIntTable(ctx context.Context, commaList string) []int {
-	ctx, span := h.tracer.Start(ctx, "plugins.databaseHandler.commaListToIntTable")
+	_, span := h.tracer.Start(ctx, "plugins.databaseHandler.commaListToIntTable")
 	defer span.End()
 
 	if len(commaList) == 0 {
@@ -370,7 +404,7 @@ func (h databaseHandler) commaListToIntTable(ctx context.Context, commaList stri
 }
 
 func (h databaseHandler) commaListToStringTable(ctx context.Context, commaList string) []string {
-	ctx, span := h.tracer.Start(ctx, "plugins.databaseHandler.commaListToStringTable")
+	_, span := h.tracer.Start(ctx, "plugins.databaseHandler.commaListToStringTable")
 	defer span.End()
 
 	if len(commaList) == 0 {
@@ -392,7 +426,7 @@ func (h databaseHandler) memoizeGroups(ctx context.Context) ([]config.Group, err
 		LEFT JOIN includegroups ig ON g1.gidnumber=ig.parentgroupid 
 		LEFT JOIN ldapgroups g2 ON ig.includegroupid=g2.gidnumber`)
 	if err != nil {
-		return nil, errors.New("Unable to memoize groups list")
+		return nil, errors.New("unable to memoize groups list")
 	}
 	defer rows.Close()
 
@@ -404,7 +438,7 @@ func (h databaseHandler) memoizeGroups(ctx context.Context) ([]config.Group, err
 	for rows.Next() {
 		err := rows.Scan(&groupName, &groupId, &includeId)
 		if err != nil {
-			return nil, errors.New("Unable to memoize groups list")
+			return nil, errors.New("unable to memoize groups list")
 		}
 		if recentId != groupId {
 			recentId = groupId
