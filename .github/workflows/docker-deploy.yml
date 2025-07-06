@@ -25,32 +25,33 @@ jobs:
           go-version: '1.21'
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev
 
-      - name: Build binaries for all platforms
+      - name: Build binaries for Docker
         working-directory: ./v2
         run: |
+          # Only build for amd64 initially to avoid CGO cross-compilation issues
+          # We'll let Docker handle multi-arch builds using buildx
           make prepare-plugins-build
-          make all
+          CGO_ENABLED=1 make linuxamd64
 
       - name: Prepare Docker assets
         working-directory: ./v2
         run: |
           # Create platform-specific directories for Docker build
           mkdir -p docker/assets/linux/amd64
-          mkdir -p docker/assets/linux/arm64
-          mkdir -p docker/assets/linux/arm/v7
           
           # Copy binaries to platform-specific directories
           cp bin/linuxamd64/glauth docker/assets/linux/amd64/
-          cp bin/linuxarm64/glauth docker/assets/linux/arm64/
-          cp bin/linuxarm/glauth docker/assets/linux/arm/v7/
+          
+          # Set executable permissions
+          chmod +x docker/assets/linux/amd64/glauth
           
           # Copy plugin files if they exist
           if [ -d "pkg/plugins" ]; then
             find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/amd64/ \; 2>/dev/null || true
-            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/arm64/ \; 2>/dev/null || true
-            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/arm/v7/ \; 2>/dev/null || true
           fi
 
       - name: Upload Docker assets
@@ -109,7 +110,7 @@ jobs:
         with:
           context: ./v2/docker
           file: ./v2/docker/Dockerfile-${{ matrix.variant }}
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
