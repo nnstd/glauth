@@ -326,6 +326,9 @@ func (l LDAPOpsHelper) searchCheckBindDN(ctx context.Context, h LDAPOpsHandler, 
 	if ldapcode != ldap.LDAPResultSuccess {
 		return "", nil, ldapcode
 	}
+
+	h.GetLog().Debug().Int("numCapabilities", len(boundUser.Capabilities)).Msg("Found boundUser")
+
 	// What if this user was bound using their UPN? We still want to enforce baseDN etc so we
 	// have to rewire them to their original DN which is of course a waste of cycles.
 	// TODO Down the road we would want to perform lightweight memoization of DNs to UPNs
@@ -676,10 +679,14 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 		// find the user
 		var foundUser bool // = false
 		foundUser, user, _ = h.FindUser(ctx, userName, false)
+
 		if !foundUser {
 			h.GetLog().Info().Str("username", userName).Msg("User not found")
 			return nil, ldap.LDAPResultInvalidCredentials
 		}
+
+		h.GetLog().Debug().Int("numCapabilities", len(user.Capabilities)).Msg("FindUser capabilities")
+
 		if checkGroup {
 			// find the group
 			var group config.Group // = nil
@@ -708,6 +715,7 @@ func (l LDAPOpsHelper) checkCapability(ctx context.Context, h LDAPOpsHandler, us
 	defer span.End()
 
 	h.GetLog().Debug().Str("action", action).Strs("objects", objects).Msg("Checking capability")
+	h.GetLog().Debug().Int("numCapabilities", len(user.Capabilities)).Msg("Found capabilities")
 
 	// User-level?
 	for _, capability := range user.Capabilities {
