@@ -6,6 +6,15 @@ FROM alpine:latest as build
 
 RUN apk add --no-cache git make busybox-static dumb-init
 
+# Copy and set permissions for binaries and scripts in build stage
+ARG TARGETPLATFORM
+COPY assets/start-standalone.sh /tmp/start-standalone.sh
+COPY assets/default-config-standalone.cfg /tmp/default-config-standalone.cfg
+COPY assets/$TARGETPLATFORM/glauth /tmp/glauth
+
+# Set execute permissions in build stage where chmod is available
+RUN chmod +x /tmp/glauth /tmp/start-standalone.sh
+
 #################
 # Run Step
 #################
@@ -21,12 +30,10 @@ LABEL maintainers="Ben Yanke <ben@benyanke.com>, Jörn Friedrich Dreyer <jfd@but
       org.opencontainers.image.version="latest" \
       org.opencontainers.image.url="https://github.com/glauth/glauth"
 
-ARG TARGETPLATFORM
-
-# Copy docker specific scripts from build container
-COPY assets/start-standalone.sh /app/docker/start-standalone.sh
-COPY assets/default-config-standalone.cfg /app/docker/default-config-standalone.cfg
-COPY assets/$TARGETPLATFORM/glauth /app/glauth
+# Copy docker specific scripts and binaries from build container with correct permissions
+COPY --from=build /tmp/start-standalone.sh /app/docker/start-standalone.sh
+COPY --from=build /tmp/default-config-standalone.cfg /app/docker/default-config-standalone.cfg
+COPY --from=build /tmp/glauth /app/glauth
 
 # Just what we need
 COPY --from=build /usr/bin/dumb-init /usr/bin/dumb-init
