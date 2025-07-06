@@ -81,6 +81,7 @@ func NewLdapHandler(opts ...Option) Handler {
 		monitor:  options.Monitor,
 		tracer:   options.Tracer,
 	}
+	
 	// parse LDAP URLs
 	for _, ldapurl := range handler.backend.Servers {
 		l, err := parseURL(ldapurl)
@@ -112,48 +113,45 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ld
 	h.log.Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Bind request")
 
 	//	if h.helper != nil {
-	if true {
+	lowerBindDN := strings.ToLower(bindDN)
+	baseDN := strings.ToLower("," + h.backend.BaseDN)
+	parts := strings.Split(strings.TrimSuffix(lowerBindDN, baseDN), ",")
+	userName := strings.TrimPrefix(parts[0], h.backend.NameFormatAsArray[0]+"=")
 
-		lowerBindDN := strings.ToLower(bindDN)
-		baseDN := strings.ToLower("," + h.backend.BaseDN)
-		parts := strings.Split(strings.TrimSuffix(lowerBindDN, baseDN), ",")
-		userName := strings.TrimPrefix(parts[0], h.backend.NameFormatAsArray[0]+"=")
+	validotp := false
 
-		validotp := false
-
-		// Find the user
-		// We are going to go through all backends and ask
-		// until we find our user or die of boredom.
-		user := config.User{}
-		found := false
-		for i, handler := range h.handlers.Handlers {
-			found, user, _ = handler.FindUser(ctx, userName, false)
-			if found {
-				break
-			}
-			if i >= *h.handlers.Count {
-				break
-			}
+	// Find the user
+	// We are going to go through all backends and ask
+	// until we find our user or die of boredom.
+	user := config.User{}
+	found := false
+	for i, handler := range h.handlers.Handlers {
+		found, user, _ = handler.FindUser(ctx, userName, false)
+		if found {
+			break
 		}
+		if i >= *h.handlers.Count {
+			break
+		}
+	}
 
-		if !found {
+	if !found {
+		validotp = true
+	} else {
+		if len(user.OTPSecret) == 0 {
 			validotp = true
 		} else {
-			if len(user.OTPSecret) == 0 {
-				validotp = true
-			} else {
-				if len(bindSimplePw) > 6 {
-					otp := bindSimplePw[len(bindSimplePw)-6:]
-					bindSimplePw = bindSimplePw[:len(bindSimplePw)-6]
-					validotp = totp.Validate(otp, user.OTPSecret)
-				}
+			if len(bindSimplePw) > 6 {
+				otp := bindSimplePw[len(bindSimplePw)-6:]
+				bindSimplePw = bindSimplePw[:len(bindSimplePw)-6]
+				validotp = totp.Validate(otp, user.OTPSecret)
 			}
 		}
+	}
 
-		if !validotp {
-			h.log.Debug().Msg(fmt.Sprintf("Bind Error: invalid OTP token as %s from %s", bindDN, conn.RemoteAddr().String()))
-			return ldap.LDAPResultInvalidCredentials, nil
-		}
+	if !validotp {
+		h.log.Debug().Msg(fmt.Sprintf("Bind Error: invalid OTP token as %s from %s", bindDN, conn.RemoteAddr().String()))
+		return ldap.LDAPResultInvalidCredentials, nil
 	}
 
 	stats.Frontend.Add("bind_reqs", 1)
@@ -163,11 +161,13 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ld
 		h.log.Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Err(err).Msg("could not get session")
 		return ldap.LDAPResultOperationsError, err
 	}
+
 	if err := s.ldap.Bind(bindDN, bindSimplePw); err != nil {
 		stats.Frontend.Add("bind_errors", 1)
 		h.log.Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("invalid creds")
 		return ldap.LDAPResultInvalidCredentials, nil
 	}
+
 	stats.Frontend.Add("bind_successes", 1)
 	h.log.Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("bind success")
 	return ldap.LDAPResultSuccess, nil
@@ -198,8 +198,8 @@ func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn n
 	}
 
 	// TypesOnly cannot be true: if it were, glauth would not be able to
-	// match the returned valuea against the query
-	if searchReq.TypesOnly == true {
+	// match the returned values against the query
+	if searchReq.TypesOnly {
 		wantTypesOnly = true
 		searchReq.TypesOnly = false
 	}
@@ -293,8 +293,9 @@ func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn n
 		attbits := h.attm.FindStringSubmatch(filter)
 		for _, entry := range sr.Entries {
 			foundattname := false
+
 			for _, attribute := range entry.Attributes {
-				if strings.ToLower(attribute.Name) == strings.ToLower(attbits[1]) {
+				if strings.EqualFold(attribute.Name, attbits[1]) {
 					foundattname = true
 					if len(attbits[2]) == 0 {
 						attribute.Values = []string{attbits[2]}
@@ -302,6 +303,7 @@ func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn n
 					break
 				}
 			}
+
 			if !foundattname {
 				entry.Attributes = append(entry.Attributes, &ldap.EntryAttribute{Name: attbits[1], Values: []string{attbits[2]}})
 			}
@@ -334,12 +336,14 @@ func (h ldapHandler) buildReqAttributesList(ctx context.Context, filter string, 
 	maxp := len(filter)
 	start := -1
 	descended := false
+
 	for p, c := range filter {
-		if c == '(' {
+		switch c {
+		case '(':
 			if p+1 < maxp {
 				start = p + 1
 			}
-		} else if c == ')' {
+		case ')':
 			if start > -1 {
 				descended = true
 				filters = h.buildReqAttributesList(ctx, filter[start:p], filters)
@@ -347,9 +351,11 @@ func (h ldapHandler) buildReqAttributesList(ctx context.Context, filter string, 
 			start = -1
 		}
 	}
+
 	if !descended {
 		filters = append(filters, filter)
 	}
+
 	return filters
 }
 
@@ -374,12 +380,14 @@ func (h ldapHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Con
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "modify", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
@@ -389,23 +397,25 @@ func (h ldapHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (res
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "delete", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
 func (h ldapHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (found bool, user config.User, err error) {
-	ctx, span := h.tracer.Start(ctx, "handler.ldapHandler.FindUser")
+	_, span := h.tracer.Start(ctx, "handler.ldapHandler.FindUser")
 	defer span.End()
 	return false, config.User{}, nil
 }
 
 func (h ldapHandler) FindGroup(ctx context.Context, groupName string) (found bool, group config.Group, err error) {
-	ctx, span := h.tracer.Start(ctx, "handler.ldapHandler.FindGroup")
+	_, span := h.tracer.Start(ctx, "handler.ldapHandler.FindGroup")
 	defer span.End()
 
 	return false, config.Group{}, nil
@@ -460,20 +470,25 @@ func (h ldapHandler) getSession(conn net.Conn) (ldapSession, error) {
 	h.lock.Unlock()
 	if !ok { // open a new server connection if not
 		var l *ldap.Conn
+
 		server, err := h.getBestServer() // pick the best server
 		if err != nil {
 			return ldapSession{}, err
 		}
+
 		dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
-		if server.Scheme == "ldaps" {
+
+		switch server.Scheme {
+		case "ldaps":
 			tlsCfg := &tls.Config{}
 			if h.backend.Insecure {
 				tlsCfg.InsecureSkipVerify = true
 			}
 			l, err = ldap.DialTLS("tcp", dest, tlsCfg)
-		} else if server.Scheme == "ldap" {
+		case "ldap":
 			l, err = ldap.Dial("tcp", dest)
 		}
+
 		if err != nil {
 			select {
 			case h.doPing <- true: // non-blocking send
@@ -481,6 +496,7 @@ func (h ldapHandler) getSession(conn net.Conn) (ldapSession, error) {
 			}
 			return ldapSession{}, err
 		}
+
 		s = ldapSession{id: id, c: conn, ldap: l}
 		h.lock.Lock()
 		h.sessions[s.id] = s
@@ -496,17 +512,21 @@ func (h ldapHandler) ping() error {
 		var err error
 		dest := fmt.Sprintf("%s:%d", s.Hostname, s.Port)
 		start := time.Now()
-		if h.servers[0].Scheme == "ldaps" {
+
+		switch h.servers[0].Scheme {
+		case "ldaps":
 			tlsCfg := &tls.Config{}
 			if h.backend.Insecure {
 				tlsCfg.InsecureSkipVerify = true
 			}
 			l, err = ldap.DialTLS("tcp", dest, tlsCfg)
-		} else if h.servers[0].Scheme == "ldap" {
+		case "ldap":
 			l, err = ldap.Dial("tcp", dest)
 		}
+
 		elapsed := time.Since(start)
 		h.lock.Lock()
+
 		if err != nil || l == nil {
 			h.log.Fatal().Str("hostname", s.Hostname).Int("port", s.Port).Err(err).Msg("server ping failed")
 			h.servers[k].Ping = 0
@@ -519,15 +539,18 @@ func (h ldapHandler) ping() error {
 		}
 		h.lock.Unlock()
 	}
+
 	h.log.Debug().Interface("servers", h.servers).Msg("Server health")
 	b, err := json.Marshal(h.servers)
 	if err != nil {
 		h.log.Fatal().Err(err).Msg("error encoding tail data")
 	}
+
 	stats.Backend.Set("servers", stats.Stringer(string(b)))
-	if healthy == false {
+	if !healthy {
 		return fmt.Errorf("no healthy servers")
 	}
+
 	return nil
 }
 
@@ -537,6 +560,7 @@ func (h ldapHandler) getBestServer() (ldapBackend, error) {
 	if err != nil {
 		return ldapBackend{}, err
 	}
+
 	bestping := forever
 	for _, s := range h.servers {
 		if s.Status == Up && s.Ping < bestping {
@@ -544,9 +568,11 @@ func (h ldapHandler) getBestServer() (ldapBackend, error) {
 			bestping = s.Ping
 		}
 	}
+
 	if bestping == forever {
-		return ldapBackend{}, fmt.Errorf("No healthy servers found")
+		return ldapBackend{}, fmt.Errorf("no healthy servers found")
 	}
+
 	h.log.Debug().Interface("favorite", favorite).Msg("Best server")
 	return favorite, nil
 }
@@ -558,26 +584,32 @@ func connID(conn net.Conn) string {
 	sha := fmt.Sprintf("% x", h.Sum(nil))
 	return string(sha)
 }
+
 func parseURL(ldapurl string) (ldapBackend, error) {
 	u, err := url.Parse(ldapurl)
 	if err != nil {
 		return ldapBackend{}, err
 	}
 	var port int
-	if u.Scheme == "ldaps" {
+
+	switch u.Scheme {
+	case "ldaps":
 		port = 636
-	} else if u.Scheme == "ldap" {
+	case "ldap":
 		port = 389
-	} else {
+	default:
 		return ldapBackend{}, fmt.Errorf("unknown LDAP scheme: %s", u.Scheme)
 	}
+
 	parts := strings.Split(u.Host, ":")
 	hostname := parts[0]
+
 	if len(parts) > 1 {
 		port, err = strconv.Atoi(parts[1])
 		if err != nil {
 			return ldapBackend{}, err
 		}
 	}
+
 	return ldapBackend{Scheme: u.Scheme, Hostname: hostname, Port: port}, nil
 }
