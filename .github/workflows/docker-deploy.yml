@@ -32,17 +32,54 @@ jobs:
       - name: Build binaries for Docker
         working-directory: ./v2
         run: |
-          # Build static binary for standalone (no CGO needed)
-          # Build with CGO for plugins (needed for plugin system)
-          make prepare-plugins-build
+          # Initialize and update submodules for plugins
+          git submodule update --init --recursive
           
-          # Build standalone version statically
+          # Build static binary for standalone (no CGO needed)
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make build
           mkdir -p bin/linuxamd64-static
           cp bin/linuxamd64/glauth bin/linuxamd64-static/glauth
           
           # Build plugins version with CGO
+          make prepare-plugins-build
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 make build
+          
+          # Build plugins manually using standard Go build
+          mkdir -p bin/plugins
+          
+          # Build SQLite plugin
+          if [ -d "pkg/plugins/glauth-sqlite" ]; then
+            cd pkg/plugins/glauth-sqlite
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/sqlite.so sqlite.go
+            cd ../../../
+          fi
+          
+          # Build MySQL plugin
+          if [ -d "pkg/plugins/glauth-mysql" ]; then
+            cd pkg/plugins/glauth-mysql
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/mysql.so mysql.go
+            cd ../../../
+          fi
+          
+          # Build PostgreSQL plugin
+          if [ -d "pkg/plugins/glauth-postgres" ]; then
+            cd pkg/plugins/glauth-postgres
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/postgres.so postgres.go
+            cd ../../../
+          fi
+          
+          # Build PAM plugin
+          if [ -d "pkg/plugins/glauth-pam" ]; then
+            cd pkg/plugins/glauth-pam
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/pam.so pam.go
+            cd ../../../
+          fi
+          
+          # Debug: List what files were created
+          echo "Files in bin directory:"
+          ls -la bin/ || true
+          echo "Files in bin/plugins directory:"
+          ls -la bin/plugins/ || true
 
       - name: Prepare Docker assets
         working-directory: ./v2
@@ -60,9 +97,18 @@ jobs:
           chmod +x docker/assets/linux/amd64/glauth-standalone
           chmod +x docker/assets/linux/amd64/glauth-plugins
           
-          # Copy plugin files if they exist
-          if [ -d "pkg/plugins" ]; then
-            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/amd64/ \; 2>/dev/null || true
+          # Copy plugin .so files built manually
+          if [ -f "bin/plugins/sqlite.so" ]; then
+            cp bin/plugins/sqlite.so docker/assets/linux/amd64/sqlite.so
+          fi
+          if [ -f "bin/plugins/mysql.so" ]; then
+            cp bin/plugins/mysql.so docker/assets/linux/amd64/mysql.so
+          fi
+          if [ -f "bin/plugins/postgres.so" ]; then
+            cp bin/plugins/postgres.so docker/assets/linux/amd64/postgres.so
+          fi
+          if [ -f "bin/plugins/pam.so" ]; then
+            cp bin/plugins/pam.so docker/assets/linux/amd64/pam.so
           fi
 
       - name: Upload Docker assets
