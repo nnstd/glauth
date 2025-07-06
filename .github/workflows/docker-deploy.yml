@@ -1,0 +1,117 @@
+name: Docker Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+
+      - name: Build binaries for all platforms
+        working-directory: ./v2
+        run: |
+          make prepare-plugins-build
+          make all
+
+      - name: Prepare Docker assets
+        working-directory: ./v2
+        run: |
+          # Create platform-specific directories for Docker build
+          mkdir -p docker/assets/linux/amd64
+          mkdir -p docker/assets/linux/arm64
+          mkdir -p docker/assets/linux/arm/v7
+          
+          # Copy binaries to platform-specific directories
+          cp bin/linuxamd64/glauth docker/assets/linux/amd64/
+          cp bin/linuxarm64/glauth docker/assets/linux/arm64/
+          cp bin/linuxarm/glauth docker/assets/linux/arm/v7/
+          
+          # Copy plugin files if they exist
+          if [ -d "pkg/plugins" ]; then
+            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/amd64/ \; 2>/dev/null || true
+            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/arm64/ \; 2>/dev/null || true
+            find pkg/plugins -name "*.so" -exec cp {} docker/assets/linux/arm/v7/ \; 2>/dev/null || true
+          fi
+
+      - name: Upload Docker assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-assets
+          path: v2/docker/assets/
+
+  build-and-push:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        variant: [standalone, plugins]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Docker assets
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-assets
+          path: v2/docker/assets/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.variant }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=GLAuth ${{ matrix.variant }}
+            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines (${{ matrix.variant }} variant)
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./v2/docker
+          file: ./v2/docker/Dockerfile-${{ matrix.variant }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max 
