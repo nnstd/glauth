@@ -10,7 +10,7 @@ RUN apk add --no-cache git make busybox-static dumb-init
 ARG TARGETPLATFORM
 COPY assets/start-standalone.sh /tmp/start-standalone.sh
 COPY assets/default-config-standalone.cfg /tmp/default-config-standalone.cfg
-COPY assets/$TARGETPLATFORM/glauth /tmp/glauth
+COPY assets/$TARGETPLATFORM/glauth-standalone /tmp/glauth
 
 # Set execute permissions in build stage where chmod is available
 RUN chmod +x /tmp/glauth /tmp/start-standalone.sh
@@ -19,7 +19,7 @@ RUN chmod +x /tmp/glauth /tmp/start-standalone.sh
 # Run Step
 #################
 
-FROM gcr.io/distroless/base-debian11 as run
+FROM gcr.io/distroless/base-debian12 as run
 
 LABEL maintainers="Ben Yanke <ben@benyanke.com>, Jörn Friedrich Dreyer <jfd@butonic.de>, Chris F Ravenscroft <chris@voilaweb.com>" \
       org.opencontainers.image.title="GLauth" \
