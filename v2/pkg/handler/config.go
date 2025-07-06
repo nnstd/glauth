@@ -51,12 +51,15 @@ func NewConfigHandler(opts ...Option) Handler {
 func (h configHandler) GetBackend() config.Backend {
 	return h.backend
 }
+
 func (h configHandler) GetLog() *zerolog.Logger {
 	return h.log
 }
+
 func (h configHandler) GetCfg() *config.Config {
 	return h.cfg
 }
+
 func (h configHandler) GetYubikeyAuth() *yubigo.YubiAuth {
 	return h.yubikeyAuth
 }
@@ -137,7 +140,7 @@ func (h configHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (r
 }
 
 func (h configHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (f bool, u config.User, err error) {
-	ctx, span := h.tracer.Start(ctx, "handler.configHandler.FindUser")
+	_, span := h.tracer.Start(ctx, "handler.configHandler.FindUser")
 	defer span.End()
 	user := config.User{}
 	found := false
@@ -160,19 +163,19 @@ func (h configHandler) FindUser(ctx context.Context, userName string, searchByUP
 }
 
 func (h configHandler) FindGroup(ctx context.Context, groupName string) (f bool, g config.Group, err error) {
-	ctx, span := h.tracer.Start(ctx, "handler.configHandler.FindGroup")
+	_, span := h.tracer.Start(ctx, "handler.configHandler.FindGroup")
 	defer span.End()
-	// TODO Does g get erased, and above does u get erased?
-	// TODO and what about f?
-	group := config.Group{}
+
+	fillGroup := config.Group{}
+
 	found := false
-	for _, g := range h.cfg.Groups {
-		if strings.EqualFold(g.Name, groupName) {
+	for _, group := range h.cfg.Groups {
+		if strings.EqualFold(group.Name, groupName) {
 			found = true
-			group = g
+			fillGroup = group
 		}
 	}
-	return found, group, nil
+	return found, fillGroup, nil
 }
 
 func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) (entrylist []*ldap.Entry, err error) {
@@ -223,8 +226,8 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "homeDirectory", Values: []string{"/home/" + u.Name}})
 		}
 
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{fmt.Sprintf("%s", u.Name)}})
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "gecos", Values: []string{fmt.Sprintf("%s", u.Name)}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{u.Name}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "gecos", Values: []string{u.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", u.PrimaryGroup)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "memberOf", Values: h.getGroupDNs(ctx, append(u.OtherGroups, u.PrimaryGroup))})
 
@@ -259,7 +262,9 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 				}
 			}
 		}
+
 		var dn string
+
 		if hierarchy == "" {
 			dn = fmt.Sprintf("%s=%s,%s=%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), h.backend.BaseDN)
 		} else {
@@ -285,7 +290,7 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 			attrs = append(attrs, &ldap.EntryAttribute{Name: groupAttr, Values: []string{g.Name}})
 		}
 
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{fmt.Sprintf("%s", g.Name)}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{g.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", g.GIDNumber)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "uniqueMember", Values: h.getGroupMemberDNs(ctx, g.GIDNumber)})
 		if asGroupOfUniqueNames {
@@ -438,7 +443,7 @@ func (h configHandler) getGroupDNs(ctx context.Context, gids []int) []string {
 }
 
 func (h configHandler) getGroupName(ctx context.Context, gid int) string {
-	ctx, span := h.tracer.Start(ctx, "handler.configHandler.getGroupName")
+	_, span := h.tracer.Start(ctx, "handler.configHandler.getGroupName")
 	defer span.End()
 
 	for _, g := range h.cfg.Groups {

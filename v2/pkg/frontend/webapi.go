@@ -36,5 +36,4 @@ func RunAPI(opts ...Option) {
 	if err := http.ListenAndServe(cfg.Listen, nil); err != nil {
 		log.Error().Err(err).Msg("error starting HTTP server")
 	}
-
 }

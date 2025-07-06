@@ -41,7 +41,7 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 		s.yubiAuth, err = yubigo.NewYubiAuth(s.c.YubikeyClientID, s.c.YubikeySecret)
 
 		if err != nil {
-			return nil, errors.New("Yubikey Auth failed")
+			return nil, errors.New("yubikey auth failed")
 		}
 	}
 
@@ -63,7 +63,7 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 		case "plugin":
 			plug, err := plugin.Open(s.c.Helper.Plugin)
 			if err != nil {
-				return nil, errors.New(fmt.Sprintf("Unable to load specified helper plugin: %s", err))
+				return nil, fmt.Errorf("unable to load specified helper plugin: %s", err)
 			}
 			nph, err := plug.Lookup(s.c.Helper.PluginHandler)
 			if err != nil {
