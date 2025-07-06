@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/GeertJohan/yubigo"
+	"github.com/IGLOU-EU/go-wildcard/v2"
 	"github.com/glauth/glauth/v2/pkg/config"
 	"github.com/glauth/glauth/v2/pkg/stats"
 	"github.com/glauth/ldap"
@@ -275,7 +276,7 @@ func (l LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN stri
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: search BaseDN %s is not in our BaseDN %s", searchBaseDN, h.GetBackend().BaseDN)
 	}
 	// Unless globally ignored, we will check that a user has capabilities allowing them to perform a search in the requested BaseDN
-	if !h.GetCfg().Behaviors.IgnoreCapabilities && !l.checkCapability(ctx, *boundUser, "search", []string{"*", searchBaseDN}) {
+	if !h.GetCfg().Behaviors.IgnoreCapabilities && !l.checkCapability(ctx, h, *boundUser, "search", []string{"*", searchBaseDN}) {
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: no capability allowing BindDN %s to perform search in %s", bindDN, searchBaseDN)
 	}
 
@@ -702,12 +703,21 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 	return &user, ldap.LDAPResultSuccess
 }
 
-func (l LDAPOpsHelper) checkCapability(ctx context.Context, user config.User, action string, objects []string) bool {
+func (l LDAPOpsHelper) checkCapability(ctx context.Context, h LDAPOpsHandler, user config.User, action string, objects []string) bool {
+	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.checkCapability")
+	defer span.End()
+
+	h.GetLog().Debug().Str("action", action).Strs("objects", objects).Msg("Checking capability")
+
 	// User-level?
 	for _, capability := range user.Capabilities {
+		h.GetLog().Debug().Str("capability", capability.Action).Msg("Checking capability")
+
 		if capability.Action == action {
 			for _, object := range objects {
-				if capability.Object == object {
+				if strings.Contains(object, "*") && wildcard.Match(capability.Object, object) {
+					return true
+				} else if capability.Object == object {
 					return true
 				}
 			}

@@ -219,7 +219,7 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 		&disabled,
 	)
 
-	h.log.Debug().Any("user", user).Int("disabled", disabled).Msg("FindUser scan")
+	h.log.Debug().Int("uidnumber", user.UIDNumber).Int("primarygroup", user.PrimaryGroup).Int("disabled", disabled).Msg("FindUser scan")
 
 	if err == nil {
 		// Convert sql.NullString to regular strings
@@ -261,6 +261,7 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 						}
 					}
 				}
+				
 				defer rows.Close()
 			}
 		}

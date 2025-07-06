@@ -19,7 +19,6 @@ func (m *LDAPMonitorWatcher) sync() {
 	for {
 		select {
 		case tick := <-m.syncTicker.C:
-			m.logger.Debug().Time("value", tick).Msg("Tick")
 			m.storeMetrics()
 		}
 	}
