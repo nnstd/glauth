@@ -204,6 +204,7 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 	h.log.Debug().Str("query", query).Str("username", userName).Msg("FindUser query")
 
 	var disabled int
+	var passBcrypt, passSHA256, otpSecret, yubikey sql.NullString
 	err = h.database.cnx.QueryRowContext(
 		ctx,
 		query,
@@ -211,16 +212,30 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 	).Scan(
 		&user.UIDNumber,
 		&user.PrimaryGroup,
-		&user.PassBcrypt,
-		&user.PassSHA256,
-		&user.OTPSecret,
-		&user.Yubikey,
+		&passBcrypt,
+		&passSHA256,
+		&otpSecret,
+		&yubikey,
 		&disabled,
 	)
 
 	h.log.Debug().Any("user", user).Int("disabled", disabled).Msg("FindUser scan")
 
 	if err == nil {
+		// Convert sql.NullString to regular strings
+		if passBcrypt.Valid {
+			user.PassBcrypt = passBcrypt.String
+		}
+		if passSHA256.Valid {
+			user.PassSHA256 = passSHA256.String
+		}
+		if otpSecret.Valid {
+			user.OTPSecret = otpSecret.String
+		}
+		if yubikey.Valid {
+			user.Yubikey = yubikey.String
+		}
+
 		user.Disabled = h.intToBool(disabled)
 
 		if !user.Disabled {
@@ -307,12 +322,61 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	var disabled int
 	var sshKeys string
 	var custattrstr string
+	var passBcrypt, passSHA256, otpSecret, yubikey, givenName, sn, mail, loginShell, homedir sql.NullString
 	u := config.User{}
 	for rows.Next() {
-		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &u.PassBcrypt, &u.PassSHA256, &u.OTPSecret, &u.Yubikey, &otherGroups, &u.GivenName, &u.SN, &u.Mail, &u.LoginShell, &u.Homedir, &disabled, &sshKeys, &custattrstr)
+		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr)
 		if err != nil {
 			return entries, err
 		}
+		
+		// Convert sql.NullString to regular strings
+		if passBcrypt.Valid {
+			u.PassBcrypt = passBcrypt.String
+		} else {
+			u.PassBcrypt = ""
+		}
+		if passSHA256.Valid {
+			u.PassSHA256 = passSHA256.String
+		} else {
+			u.PassSHA256 = ""
+		}
+		if otpSecret.Valid {
+			u.OTPSecret = otpSecret.String
+		} else {
+			u.OTPSecret = ""
+		}
+		if yubikey.Valid {
+			u.Yubikey = yubikey.String
+		} else {
+			u.Yubikey = ""
+		}
+		if givenName.Valid {
+			u.GivenName = givenName.String
+		} else {
+			u.GivenName = ""
+		}
+		if sn.Valid {
+			u.SN = sn.String
+		} else {
+			u.SN = ""
+		}
+		if mail.Valid {
+			u.Mail = mail.String
+		} else {
+			u.Mail = ""
+		}
+		if loginShell.Valid {
+			u.LoginShell = loginShell.String
+		} else {
+			u.LoginShell = ""
+		}
+		if homedir.Valid {
+			u.Homedir = homedir.String
+		} else {
+			u.Homedir = ""
+		}
+
 		u.OtherGroups = h.commaListToIntTable(ctx, otherGroups)
 		u.Disabled = h.intToBool(disabled)
 		u.SSHKeys = h.commaListToStringTable(ctx, sshKeys)
@@ -481,11 +545,26 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 	defer rows.Close()
 
 	var otherGroups string
+	var passBcrypt, passSHA256, otpSecret, yubikey sql.NullString
 	u := config.User{}
 	for rows.Next() {
-		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &u.PassBcrypt, &u.PassSHA256, &u.OTPSecret, &u.Yubikey, &otherGroups)
+		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups)
 		if err != nil {
 			return []string{}
+		}
+		
+		// Convert sql.NullString to regular strings
+		if passBcrypt.Valid {
+			u.PassBcrypt = passBcrypt.String
+		}
+		if passSHA256.Valid {
+			u.PassSHA256 = passSHA256.String
+		}
+		if otpSecret.Valid {
+			u.OTPSecret = otpSecret.String
+		}
+		if yubikey.Valid {
+			u.Yubikey = yubikey.String
 		}
 		if u.PrimaryGroup == gid {
 			dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
@@ -543,11 +622,26 @@ func (h databaseHandler) getGroupMemberIDs(ctx context.Context, gid int) []strin
 	defer rows.Close()
 
 	var otherGroups string
+	var passBcrypt, passSHA256, otpSecret, yubikey sql.NullString
 	u := config.User{}
 	for rows.Next() {
-		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &u.PassBcrypt, &u.PassSHA256, &u.OTPSecret, &u.Yubikey, &otherGroups)
+		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups)
 		if err != nil {
 			return []string{}
+		}
+		
+		// Convert sql.NullString to regular strings
+		if passBcrypt.Valid {
+			u.PassBcrypt = passBcrypt.String
+		}
+		if passSHA256.Valid {
+			u.PassSHA256 = passSHA256.String
+		}
+		if otpSecret.Valid {
+			u.OTPSecret = otpSecret.String
+		}
+		if yubikey.Valid {
+			u.Yubikey = yubikey.String
 		}
 		if u.PrimaryGroup == gid {
 			members[u.Name] = true
