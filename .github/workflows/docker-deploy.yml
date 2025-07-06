@@ -44,11 +44,12 @@ jobs:
           make prepare-plugins-build
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 make build
           
-          # Build plugins manually using standard Go build
+          # Build plugins directly with go build
           mkdir -p bin/plugins
           
           # Build SQLite plugin
           if [ -d "pkg/plugins/glauth-sqlite" ]; then
+            echo "Building SQLite plugin..."
             cd pkg/plugins/glauth-sqlite
             CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/sqlite.so sqlite.go
             cd ../../../
@@ -56,6 +57,7 @@ jobs:
           
           # Build MySQL plugin
           if [ -d "pkg/plugins/glauth-mysql" ]; then
+            echo "Building MySQL plugin..."
             cd pkg/plugins/glauth-mysql
             CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/mysql.so mysql.go
             cd ../../../
@@ -63,15 +65,9 @@ jobs:
           
           # Build PostgreSQL plugin
           if [ -d "pkg/plugins/glauth-postgres" ]; then
+            echo "Building PostgreSQL plugin..."
             cd pkg/plugins/glauth-postgres
             CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/postgres.so postgres.go
-            cd ../../../
-          fi
-          
-          # Build PAM plugin
-          if [ -d "pkg/plugins/glauth-pam" ]; then
-            cd pkg/plugins/glauth-pam
-            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/pam.so pam.go
             cd ../../../
           fi
           
