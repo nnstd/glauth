@@ -66,7 +66,7 @@ func NewLDAPOpsHelper(tracer trace.Tracer) LDAPOpsHelper {
 	return helper
 }
 
-func (l LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bindSimplePw string, conn net.Conn) (resultCode ldap.LDAPResultCode, err error) {
+func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bindSimplePw string, conn net.Conn) (resultCode ldap.LDAPResultCode, err error) {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.Bind")
 	defer span.End()
 
@@ -219,12 +219,12 @@ func (l LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bindS
  * TODO #5:
  * Document roll out of schemas
  */
-func (l LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
+func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.Search")
 	defer span.End()
 
 	if l.isInTimeout(ctx, h, conn) {
-		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultUnwillingToPerform}, fmt.Errorf("Source is in a timeout")
+		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultUnwillingToPerform}, fmt.Errorf("source is in a timeout")
 	}
 
 	bindDN = strings.ToLower(bindDN)
@@ -247,9 +247,9 @@ func (l LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN stri
 
 	switch entries, ldapcode := l.searchMaybeRootDSEQuery(ctx, h, baseDN, searchBaseDN, searchReq, anonymous); ldapcode {
 	case ldap.LDAPResultUnwillingToPerform:
-		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("Search Error: No BaseDN provided")
+		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("search Error: No BaseDN provided")
 	case ldap.LDAPResultInsufficientAccessRights:
-		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("Root DSE Search Error: Anonymous BindDN not allowed %s", bindDN)
+		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("root DSE Search Error: Anonymous BindDN not allowed %s", bindDN)
 	case ldap.LDAPResultSuccess:
 		return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldapcode}, nil
 	}
@@ -261,7 +261,7 @@ func (l LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN stri
 
 	switch entries, ldapcode, attributename := l.searchMaybeSchemaQuery(ctx, h, baseDN, searchBaseDN, searchReq, anonymous); ldapcode {
 	case ldap.LDAPResultOperationsError:
-		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("Schema Error: attribute %s cannot be read", *attributename)
+		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("schema Error: attribute %s cannot be read", *attributename)
 	case ldap.LDAPResultSuccess:
 		return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldapcode}, nil
 	}
@@ -297,7 +297,7 @@ func (l LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN stri
 
 	filterEntity, err := ldap.GetFilterObjectClass(searchReq.Filter)
 	if err != nil {
-		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("Search Error: error parsing filter: %s", searchReq.Filter)
+		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("search Error: error parsing filter: %s", searchReq.Filter)
 	}
 
 	switch entries, ldapcode := l.searchMaybePosixGroups(ctx, h, baseDN, searchBaseDN, searchReq, filterEntity); ldapcode {
@@ -704,7 +704,7 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 }
 
 func (l LDAPOpsHelper) checkCapability(ctx context.Context, h LDAPOpsHandler, user config.User, action string, objects []string) bool {
-	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.checkCapability")
+	_, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.checkCapability")
 	defer span.End()
 
 	h.GetLog().Debug().Str("action", action).Strs("objects", objects).Msg("Checking capability")
@@ -714,15 +714,22 @@ func (l LDAPOpsHelper) checkCapability(ctx context.Context, h LDAPOpsHandler, us
 		h.GetLog().Debug().Str("capability", capability.Action).Msg("Checking capability")
 
 		if capability.Action == action {
+			h.GetLog().Debug().Str("capability", capability.Action).Msg("Action matches")
+
 			for _, object := range objects {
+				h.GetLog().Debug().Str("object", object).Str("capability", capability.Object).Msg("Checking object")
+
 				if strings.Contains(object, "*") && wildcard.Match(capability.Object, object) {
 					return true
 				} else if capability.Object == object {
 					return true
 				}
+
+				h.GetLog().Debug().Msg("Object does not match")
 			}
 		}
 	}
+
 	return false
 }
 
@@ -730,14 +737,14 @@ func (l LDAPOpsHelper) checkCapability(ctx context.Context, h LDAPOpsHandler, us
 // library will weed out this entry since it does *not* contain an objectclass attribute
 // so we are going to re-inject it to keep the LDAP library happy
 func (l LDAPOpsHelper) collectRequestedAttributesBack(ctx context.Context, attrs []*ldap.EntryAttribute, searchReq ldap.SearchRequest) []*ldap.EntryAttribute {
-	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.collectRequestedAttributesBack")
+	_, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.collectRequestedAttributesBack")
 	defer span.End()
 
 	attbits := configattributematcher.FindStringSubmatch(searchReq.Filter)
 	if len(attbits) == 3 {
 		foundattname := false
 		for _, attr := range attrs {
-			if strings.ToLower(attr.Name) == strings.ToLower(attbits[1]) {
+			if strings.EqualFold(attr.Name, attbits[1]) {
 				foundattname = true
 				break
 			}
@@ -751,7 +758,7 @@ func (l LDAPOpsHelper) collectRequestedAttributesBack(ctx context.Context, attrs
 }
 
 // return true if we should not process the current operation
-func (l LDAPOpsHelper) isInTimeout(ctx context.Context, handler LDAPOpsHandler, conn net.Conn) bool {
+func (l *LDAPOpsHelper) isInTimeout(ctx context.Context, handler LDAPOpsHandler, conn net.Conn) bool {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.isInTimeout")
 	defer span.End()
 
@@ -780,7 +787,7 @@ func (l LDAPOpsHelper) isInTimeout(ctx context.Context, handler LDAPOpsHandler, 
 	return false
 }
 
-func (l LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHandler, conn net.Conn, noteFailure bool) bool {
+func (l *LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHandler, conn net.Conn, noteFailure bool) bool {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.maybePutInTimeout")
 	defer span.End()
 
@@ -791,7 +798,7 @@ func (l LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHan
 
 	remoteAddr := l.getAddr(ctx, conn)
 	now := time.Now()
-	info, _ := l.sources[remoteAddr]
+	info := l.sources[remoteAddr]
 	// if we have a failed bind...
 	if noteFailure {
 		info.failures <- failedBind{ts: time.Now()}
@@ -818,13 +825,14 @@ func (l LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHan
 				delete(l.sources, sourceIP)
 			}
 		}
+
 		l.nextPruning = time.Now().Add(cfg.Behaviors.PruneSourceTableEvery * time.Second)
 	}
 	return false
 }
 
 func (l LDAPOpsHelper) getAddr(ctx context.Context, conn net.Conn) string {
-	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.getAddr")
+	_, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.getAddr")
 	defer span.End()
 
 	fullAddr := conn.RemoteAddr().String()
