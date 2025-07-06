@@ -18,7 +18,7 @@ type LDAPMonitorWatcher struct {
 func (m *LDAPMonitorWatcher) sync() {
 	for {
 		select {
-		case tick := <-m.syncTicker.C:
+		case <-m.syncTicker.C:
 			m.storeMetrics()
 		}
 	}
