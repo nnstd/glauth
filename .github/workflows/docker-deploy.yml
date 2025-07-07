@@ -31,7 +31,7 @@ jobs:
 
       - name: Install xgo for cross-compilation
         run: |
-          go install github.com/karalabe/xgo@latest
+          go install src.techknowlogick.com/xgo@latest
 
       - name: Build main binaries for all architectures
         working-directory: ./v2
@@ -43,7 +43,7 @@ jobs:
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build main binaries using xgo with the same targets as Makefile
-          xgo -v -ldflags="-s -w" -go $GO_RELEASE_V -out glauth -dest bin \
+          xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out glauth -dest bin \
             -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" .
           
           # Create sha256 files for each binary
@@ -66,7 +66,7 @@ jobs:
           # Build SQLite plugin
           if [ -d "pkg/plugins/glauth-sqlite" ]; then
             echo "Building SQLite plugin..."
-            xgo -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest bin \
+            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -pkg pkg/plugins/glauth-sqlite/sqlite.go .
           fi
@@ -74,7 +74,7 @@ jobs:
           # Build MySQL plugin
           if [ -d "pkg/plugins/glauth-mysql" ]; then
             echo "Building MySQL plugin..."
-            xgo -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest bin \
+            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -pkg pkg/plugins/glauth-mysql/mysql.go .
           fi
@@ -82,7 +82,7 @@ jobs:
           # Build PostgreSQL plugin
           if [ -d "pkg/plugins/glauth-postgres" ]; then
             echo "Building PostgreSQL plugin..."
-            xgo -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest bin \
+            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -pkg pkg/plugins/glauth-postgres/postgres.go .
           fi
@@ -90,9 +90,9 @@ jobs:
           # Build PAM plugin (Linux only due to PAM dependency)
           if [ -d "pkg/plugins/glauth-pam" ]; then
             echo "Building PAM plugin..."
-            xgo -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest bin \
+            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
-              -pkg pkg/plugins/glauth-pam/pam.go -deps 'apt update && apt install -y libpam0g-dev' .
+              -pkg pkg/plugins/glauth-pam/pam.go -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' .
           fi
           
           # Rename plugin files to add .so extension
