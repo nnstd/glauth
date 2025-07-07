@@ -59,9 +59,10 @@ jobs:
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build main binaries using xgo with the same targets as Makefile
+          # Use local directory and enable modules
           xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out glauth -dest bin \
             -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" \
-            github.com/nnstd/glauth/v2
+            -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           
           # Create sha256 files for each binary
           cd bin
@@ -90,7 +91,7 @@ jobs:
             echo "Building SQLite plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-sqlite/sqlite.go github.com/nnstd/glauth/v2
+              -pkg pkg/plugins/glauth-sqlite/sqlite.go -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           fi
           
           # Build MySQL plugin
@@ -98,7 +99,7 @@ jobs:
             echo "Building MySQL plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-mysql/mysql.go github.com/nnstd/glauth/v2
+              -pkg pkg/plugins/glauth-mysql/mysql.go -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           fi
           
           # Build PostgreSQL plugin
@@ -106,7 +107,7 @@ jobs:
             echo "Building PostgreSQL plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-postgres/postgres.go github.com/nnstd/glauth/v2
+              -pkg pkg/plugins/glauth-postgres/postgres.go -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           fi
           
           # Build PAM plugin (Linux only due to PAM dependency)
@@ -115,7 +116,7 @@ jobs:
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
               -pkg pkg/plugins/glauth-pam/pam.go -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' \
-              github.com/nnstd/glauth/v2
+              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           fi
           
           # Rename plugin files to add .so extension
