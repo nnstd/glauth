@@ -39,12 +39,29 @@ jobs:
           # Initialize and update submodules for plugins
           git submodule update --init --recursive
           
+          # Ensure all dependencies are properly downloaded and verified
+          go mod download
+          go mod verify
+          go mod tidy
+          
+          # Explicitly get the missing dependency that causes issues in xgo
+          go get github.com/munnerz/goautoneg
+          go get github.com/prometheus/common/expfmt@v0.65.0
+          
+          # Update go.sum and mod files after adding dependencies
+          go mod tidy
+          
+          # List module status for debugging
+          echo "Go module status:"
+          go list -m all | grep -E "(prometheus|munnerz)" || true
+          
           # Use xgo to build for multiple platforms
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build main binaries using xgo with the same targets as Makefile
           xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out glauth -dest bin \
-            -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" .
+            -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" \
+            github.com/nnstd/glauth/v2
           
           # Create sha256 files for each binary
           cd bin
@@ -61,6 +78,11 @@ jobs:
           # Prepare plugin dependencies
           make prepare-plugins-build
           
+          # Ensure all dependencies are up to date after plugin preparation
+          go mod download
+          go mod verify
+          go mod tidy
+          
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build SQLite plugin
@@ -68,7 +90,7 @@ jobs:
             echo "Building SQLite plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-sqlite/sqlite.go .
+              -pkg pkg/plugins/glauth-sqlite/sqlite.go github.com/nnstd/glauth/v2
           fi
           
           # Build MySQL plugin
@@ -76,7 +98,7 @@ jobs:
             echo "Building MySQL plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-mysql/mysql.go .
+              -pkg pkg/plugins/glauth-mysql/mysql.go github.com/nnstd/glauth/v2
           fi
           
           # Build PostgreSQL plugin
@@ -84,7 +106,7 @@ jobs:
             echo "Building PostgreSQL plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -pkg pkg/plugins/glauth-postgres/postgres.go .
+              -pkg pkg/plugins/glauth-postgres/postgres.go github.com/nnstd/glauth/v2
           fi
           
           # Build PAM plugin (Linux only due to PAM dependency)
@@ -92,7 +114,8 @@ jobs:
             echo "Building PAM plugin..."
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
-              -pkg pkg/plugins/glauth-pam/pam.go -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' .
+              -pkg pkg/plugins/glauth-pam/pam.go -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' \
+              github.com/nnstd/glauth/v2
           fi
           
           # Rename plugin files to add .so extension
