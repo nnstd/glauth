@@ -88,18 +88,38 @@ jobs:
           go mod verify
           go mod tidy
           
+          # Create vendor directory to ensure consistent builds
+          go mod vendor
+          
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build SQLite plugin
           if [ -d "pkg/plugins/glauth-sqlite" ]; then
             echo "Building SQLite plugin..."
             cd pkg/plugins/glauth-sqlite
-            go mod download
-            go mod verify
+            
+            # Use the main module's go.mod and go.sum for consistent builds
+            cp ../../../go.mod ./go.mod.backup 2>/dev/null || true
+            cp ../../../go.sum ./go.sum.backup 2>/dev/null || true
+            
+            # Update module name but keep all dependencies from main module
+            sed 's/^module.*/module github.com\/glauth\/glauth-sqlite/' ../../../go.mod > go.mod
+            cp ../../../go.sum go.sum
+            
+            # Add plugin-specific dependencies
+            go mod edit -require=github.com/mattn/go-sqlite3@v1.14.15
             go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+            
+            # Restore original go.mod if it existed
+            if [ -f "./go.mod.backup" ]; then
+              mv ./go.mod.backup ./go.mod
+              mv ./go.sum.backup ./go.sum
+            fi
+            
             cd ../../..
           fi
           
@@ -107,12 +127,29 @@ jobs:
           if [ -d "pkg/plugins/glauth-mysql" ]; then
             echo "Building MySQL plugin..."
             cd pkg/plugins/glauth-mysql
-            go mod download
-            go mod verify
+            
+            # Use the main module's go.mod and go.sum for consistent builds
+            cp ../../../go.mod ./go.mod.backup 2>/dev/null || true
+            cp ../../../go.sum ./go.sum.backup 2>/dev/null || true
+            
+            # Update module name but keep all dependencies from main module
+            sed 's/^module.*/module github.com\/glauth\/glauth-mysql/' ../../../go.mod > go.mod
+            cp ../../../go.sum go.sum
+            
+            # Add plugin-specific dependencies
+            go mod edit -require=github.com/go-sql-driver/mysql@v1.6.0
             go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+            
+            # Restore original go.mod if it existed
+            if [ -f "./go.mod.backup" ]; then
+              mv ./go.mod.backup ./go.mod
+              mv ./go.sum.backup ./go.sum
+            fi
+            
             cd ../../..
           fi
           
@@ -120,12 +157,29 @@ jobs:
           if [ -d "pkg/plugins/glauth-postgres" ]; then
             echo "Building PostgreSQL plugin..."
             cd pkg/plugins/glauth-postgres
-            go mod download
-            go mod verify
+            
+            # Use the main module's go.mod and go.sum for consistent builds
+            cp ../../../go.mod ./go.mod.backup 2>/dev/null || true
+            cp ../../../go.sum ./go.sum.backup 2>/dev/null || true
+            
+            # Update module name but keep all dependencies from main module
+            sed 's/^module.*/module github.com\/glauth\/glauth-postgres/' ../../../go.mod > go.mod
+            cp ../../../go.sum go.sum
+            
+            # Add plugin-specific dependencies
+            go mod edit -require=github.com/lib/pq@v1.10.7
             go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+            
+            # Restore original go.mod if it existed
+            if [ -f "./go.mod.backup" ]; then
+              mv ./go.mod.backup ./go.mod
+              mv ./go.sum.backup ./go.sum
+            fi
+            
             cd ../../..
           fi
           
