@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"database/sql"
@@ -6,7 +6,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/nnstd/glauth/v2/pkg/plugins"
 )
 
 type MysqlBackend struct {
@@ -14,7 +13,7 @@ type MysqlBackend struct {
 
 func NewMySQLHandler(opts ...handler.Option) handler.Handler {
 	backend := MysqlBackend{}
-	return plugins.NewDatabaseHandler(backend, opts...)
+	return NewDatabaseHandler(backend, opts...)
 }
 
 func (b MysqlBackend) GetDriverName() string {

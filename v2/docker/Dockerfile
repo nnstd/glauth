@@ -8,12 +8,13 @@ RUN apk add --no-cache git make busybox-static dumb-init
 
 # Copy and set permissions for binaries and scripts in build stage
 ARG TARGETPLATFORM
-COPY assets/start-standalone.sh /tmp/start-standalone.sh
-COPY assets/default-config-standalone.cfg /tmp/default-config-standalone.cfg
-COPY assets/$TARGETPLATFORM/glauth-standalone /tmp/glauth
+COPY assets/start.sh /tmp/start.sh
+COPY assets/default-config.cfg /tmp/default-config.cfg
+COPY assets/gl.db /tmp/gl.db
+COPY assets/$TARGETPLATFORM/glauth /tmp/glauth
 
 # Set execute permissions in build stage where chmod is available
-RUN chmod +x /tmp/glauth /tmp/start-standalone.sh
+RUN chmod +x /tmp/glauth /tmp/start.sh
 
 #################
 # Run Step
@@ -31,8 +32,9 @@ LABEL maintainers="Ben Yanke <ben@benyanke.com>, Jörn Friedrich Dreyer <jfd@but
       org.opencontainers.image.url="https://github.com/glauth/glauth"
 
 # Copy docker specific scripts and binaries from build container with correct permissions
-COPY --from=build /tmp/start-standalone.sh /app/docker/start-standalone.sh
-COPY --from=build /tmp/default-config-standalone.cfg /app/docker/default-config-standalone.cfg
+COPY --from=build /tmp/start.sh /app/docker/start.sh
+COPY --from=build /tmp/default-config.cfg /app/docker/default-config.cfg
+COPY --from=build /tmp/gl.db /app/docker/gl.db
 COPY --from=build /tmp/glauth /app/glauth
 
 # Just what we need
@@ -46,4 +48,4 @@ RUN ln /bin/sh /usr/bin/cp && ln /bin/sh /usr/bin/mkdir && rm /bin/ln /bin/rm
 EXPOSE 389 636 5555
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["/bin/sh", "/app/docker/start-standalone.sh"]
+CMD ["/bin/sh", "/app/docker/start.sh"] 

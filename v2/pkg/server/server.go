@@ -9,10 +9,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/GeertJohan/yubigo"
+	"github.com/glauth/ldap"
 	"github.com/nnstd/glauth/v2/internal/monitoring"
 	"github.com/nnstd/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/database"
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/glauth/ldap"
 )
 
 type LdapSvc struct {
@@ -155,6 +156,30 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				handler.Monitor(s.monitor),
 				handler.Tracer(s.tracer),
 			)
+		case "database":
+			var dbType database.DatabaseType
+			if backend.DatabaseType != "" {
+				dbType = database.DatabaseType(backend.DatabaseType)
+			} else {
+				// Auto-detect database type from connection string
+				var err error
+				dbType, err = database.DetectDatabaseType(backend.Database)
+				if err != nil {
+					return nil, fmt.Errorf("unable to detect database type from connection string: %s", err)
+				}
+			}
+			h, err = database.NewHandler(dbType,
+				handler.Backend(backend),
+				handler.Logger(&s.log),
+				handler.Config(s.c),
+				handler.YubiAuth(s.yubiAuth),
+				handler.LDAPHelper(loh),
+				handler.Monitor(s.monitor),
+				handler.Tracer(s.tracer),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("unable to create database handler: %s", err)
+			}
 		case "embed":
 			h, err = NewEmbed(
 				handler.Backend(backend),
@@ -169,7 +194,7 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("unsupported backend %s - must be one of 'config', 'ldap','owncloud' or 'plugin'", backend.Datastore)
+			return nil, fmt.Errorf("unsupported backend %s - must be one of 'config', 'ldap','owncloud', 'database' or 'plugin'", backend.Datastore)
 		}
 		s.log.Info().Str("datastore", backend.Datastore).Int("position", i).Msg("Loading backend")
 

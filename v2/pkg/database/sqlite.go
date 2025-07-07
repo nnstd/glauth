@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"database/sql"
@@ -6,7 +6,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/nnstd/glauth/v2/pkg/plugins"
 )
 
 type SqliteBackend struct {
@@ -14,7 +13,7 @@ type SqliteBackend struct {
 
 func NewSQLiteHandler(opts ...handler.Option) handler.Handler {
 	backend := SqliteBackend{}
-	return plugins.NewDatabaseHandler(backend, opts...)
+	return NewDatabaseHandler(backend, opts...)
 }
 
 func (b SqliteBackend) GetDriverName() string {
@@ -37,7 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
 	givenname TEXT DEFAULT '',
 	sn TEXT DEFAULT '',
 	mail TEXT DEFAULT '',
-	loginshell TYEXT DEFAULT '',
+	loginshell TEXT DEFAULT '',
 	homedirectory TEXT DEFAULT '',
 	disabled SMALLINT  DEFAULT 0,
 	passsha256 TEXT DEFAULT '',
@@ -73,5 +72,3 @@ func (b SqliteBackend) MigrateSchema(db *sql.DB, checker func(*sql.DB, string, s
 		statement.Exec()
 	}
 }
-
-func main() {}

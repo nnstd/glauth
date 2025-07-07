@@ -200,12 +200,7 @@ func TestSampleSimple(t *testing.T) {
 	stopSvc(svc)
 }
 
-func TestSQLitePlugin(t *testing.T) {
-	matchingLibrary := doRunGetFirst(RD, "ls", "bin/sqlite.so")
-	if matchingLibrary != "bin/sqlite.so" {
-		t.SkipNow()
-	}
-
+func TestSQLiteDatabase(t *testing.T) {
 	env := testEnv{
 		checkanonymousrootDSE: true,
 		checkTOTP:             false,
@@ -221,7 +216,7 @@ func TestSQLitePlugin(t *testing.T) {
 		checkemployeetype:     "",
 	}
 
-	svc := startSvc(SD, "bin/glauth", "-c", "pkg/plugins/glauth-sqlite/sample-database.cfg")
+	svc := startSvc(SD, "bin/glauth", "-c", "sample-database.cfg")
 	batteryOfTests(t, &env)
 	stopSvc(svc)
 }

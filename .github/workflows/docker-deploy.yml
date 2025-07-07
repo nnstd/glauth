@@ -36,9 +36,6 @@ jobs:
       - name: Build main binaries for all architectures
         working-directory: ./v2
         run: |
-          # Initialize and update submodules for plugins
-          git submodule update --init --recursive
-          
           # Ensure all dependencies are properly downloaded and verified
           GOWORK=off go mod download
           GOWORK=off go mod verify
@@ -55,14 +52,14 @@ jobs:
           echo "Go module status:"
           GOWORK=off go list -m all | grep -E "(prometheus|munnerz)" || true
           
-          # Store the exact Go version and build flags for plugin builds
+          # Store the exact Go version and build flags
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           echo "GO_VERSION=$GO_RELEASE_V" >> $GITHUB_ENV
           echo "BUILD_LDFLAGS=-s -w" >> $GITHUB_ENV
           echo "XGO_IMAGE=techknowlogick/xgo:latest" >> $GITHUB_ENV
           
-          # Build main binaries using xgo with the same targets as Makefile
-          # Use local directory and enable modules
+          # Build main binaries using xgo with embedded database support
+          # Database handlers are now embedded, no separate plugins needed
           xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out glauth -dest bin \
             -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" \
             -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
@@ -80,173 +77,6 @@ jobs:
             fi
           done
 
-      - name: Build plugins for supported architectures
-        working-directory: ./v2
-        run: |
-          # Prepare plugin dependencies
-          make prepare-plugins-build
-
-          # Ensure all dependencies are up to date after plugin preparation
-          GOWORK=off go mod download
-          GOWORK=off go mod verify
-          GOWORK=off go mod tidy
-          
-          # Create a hash of the current module state for verification
-          echo "Creating module state hash..."
-          GOWORK=off go list -m all | sort | sha256sum > module-state.hash
-          cat module-state.hash
-          
-          # Use the same build environment as main binaries
-          echo "Using stored build environment:"
-          echo "GO_VERSION=$GO_VERSION"
-          echo "BUILD_LDFLAGS=$BUILD_LDFLAGS"
-          echo "XGO_IMAGE=$XGO_IMAGE"
-          
-          # Build SQLite plugin
-          if [ -d "pkg/plugins/glauth-sqlite" ]; then
-            echo "Building SQLite plugin..."
-            cd pkg/plugins/glauth-sqlite
-            
-            # Backup original module files if they exist
-            mv go.mod go.mod.original 2>/dev/null || true
-            mv go.sum go.sum.original 2>/dev/null || true
-            
-            # Create go.mod with exact same dependencies as main module
-            cp ../../../go.mod go.mod
-            cp ../../../go.sum go.sum
-            sed -i 's/^module.*/module github.com\/glauth\/glauth-sqlite/' go.mod
-            echo "require github.com/mattn/go-sqlite3 v1.14.15" >> go.mod
-            
-            # Build with updated module files
-            GOWORK=off go mod tidy
-            
-            # Verify module state matches main module (excluding plugin-specific deps)
-            echo "Verifying module state consistency..."
-            GOWORK=off go list -m all | grep -v "github.com/mattn/go-sqlite3" | sort | sha256sum > plugin-state.hash
-            if ! diff ../../../module-state.hash plugin-state.hash; then
-              echo "WARNING: Plugin module state differs from main module"
-            fi
-            
-            GOWORK=off xgo -image $XGO_IMAGE -v -ldflags="$BUILD_LDFLAGS" -go $GO_VERSION -out sqlite -dest ../../../bin \
-              -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
-            
-            # Restore original module files
-            rm -f go.mod go.sum plugin-state.hash
-            mv go.mod.original go.mod 2>/dev/null || true
-            mv go.sum.original go.sum 2>/dev/null || true
-            cd ../../..
-          fi
-          
-          # Build MySQL plugin
-          if [ -d "pkg/plugins/glauth-mysql" ]; then
-            echo "Building MySQL plugin..."
-            cd pkg/plugins/glauth-mysql
-            
-            # Backup original module files if they exist
-            mv go.mod go.mod.original 2>/dev/null || true
-            mv go.sum go.sum.original 2>/dev/null || true
-            
-            # Create go.mod with exact same dependencies as main module
-            cp ../../../go.mod go.mod
-            cp ../../../go.sum go.sum
-            sed -i 's/^module.*/module github.com\/glauth\/glauth-mysql/' go.mod
-            echo "require github.com/go-sql-driver/mysql v1.6.0" >> go.mod
-            
-            # Build with updated module files
-            GOWORK=off go mod tidy
-            
-            # Verify module state matches main module (excluding plugin-specific deps)
-            echo "Verifying module state consistency..."
-            GOWORK=off go list -m all | grep -v "github.com/go-sql-driver/mysql" | sort | sha256sum > plugin-state.hash
-            if ! diff ../../../module-state.hash plugin-state.hash; then
-              echo "WARNING: Plugin module state differs from main module"
-            fi
-            
-            GOWORK=off xgo -image $XGO_IMAGE -v -ldflags="$BUILD_LDFLAGS" -go $GO_VERSION -out mysql -dest ../../../bin \
-              -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
-            
-            # Restore original module files
-            rm -f go.mod go.sum plugin-state.hash
-            mv go.mod.original go.mod 2>/dev/null || true
-            mv go.sum.original go.sum 2>/dev/null || true
-            cd ../../..
-          fi
-          
-          # Build PostgreSQL plugin
-          if [ -d "pkg/plugins/glauth-postgres" ]; then
-            echo "Building PostgreSQL plugin..."
-            cd pkg/plugins/glauth-postgres
-            
-            # Backup original module files if they exist
-            mv go.mod go.mod.original 2>/dev/null || true
-            mv go.sum go.sum.original 2>/dev/null || true
-            
-            # Create go.mod with exact same dependencies as main module
-            cp ../../../go.mod go.mod
-            cp ../../../go.sum go.sum
-            sed -i 's/^module.*/module github.com\/glauth\/glauth-postgres/' go.mod
-            echo "require github.com/lib/pq v1.10.7" >> go.mod
-            
-            # Build with updated module files
-            GOWORK=off go mod tidy
-            
-            # Verify module state matches main module (excluding plugin-specific deps)
-            echo "Verifying module state consistency..."
-            GOWORK=off go list -m all | grep -v "github.com/lib/pq" | sort | sha256sum > plugin-state.hash
-            if ! diff ../../../module-state.hash plugin-state.hash; then
-              echo "WARNING: Plugin module state differs from main module"
-            fi
-            
-            GOWORK=off xgo -image $XGO_IMAGE -v -ldflags="$BUILD_LDFLAGS" -go $GO_VERSION -out postgres -dest ../../../bin \
-              -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
-            
-            # Restore original module files
-            rm -f go.mod go.sum plugin-state.hash
-            mv go.mod.original go.mod 2>/dev/null || true
-            mv go.sum.original go.sum 2>/dev/null || true
-            cd ../../..
-          fi
-          
-          # Build PAM plugin (Linux only due to PAM dependency)
-          # Note: Building PAM plugin locally since it requires system PAM headers
-          # Only building for linux/amd64 since cross-compilation with CGO and PAM dependencies is complex
-          # if [ -d "pkg/plugins/glauth-pam" ]; then
-          #   echo "Building PAM plugin..."
-          #   cd pkg/plugins/glauth-pam
-          #   go mod download
-          #   go mod verify
-          #   go mod tidy
-            
-          #   # Build for linux/amd64 architecture (runner is amd64)
-          #   GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o ../../../bin/pam-linux-amd64.so .
-            
-          #   cd ../../..
-          # fi
-          
-          # Fix ownership and permissions for plugin files created by xgo
-          sudo chown -R $USER:$USER bin/ 2>/dev/null || true
-          chmod -R 755 bin/ 2>/dev/null || true
-          
-          # Rename plugin files to add .so extension
-          cd bin
-          for lib in $(ls *-* | grep -v \.so$ | grep -v glauth-); do 
-            if [[ -f "$lib" ]]; then
-              echo "Renaming $lib to $lib.so"
-              mv "$lib" "$lib.so"
-            fi
-          done
-          
-          # Create sha256 files for each plugin
-          for plugin in *.so; do
-            if [[ -f "$plugin" ]]; then
-              echo "Creating sha256 for $plugin"
-              sha256sum "$plugin" > "$plugin.sha256"
-            fi
-          done
-
       - name: List all built artifacts
         working-directory: ./v2/bin
         run: |
@@ -259,7 +89,7 @@ jobs:
           # Ensure all files have proper permissions and ownership
           sudo chown -R runner:runner . 2>/dev/null || true
           chmod -R 644 *.sha256 2>/dev/null || true
-          chmod -R 755 glauth-* *.so 2>/dev/null || true
+          chmod -R 755 glauth-* 2>/dev/null || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -293,50 +123,18 @@ jobs:
           # Create platform-specific directories for Docker build
           mkdir -p docker/assets/linux/amd64 docker/assets/linux/arm64 docker/assets/linux/arm/v7
           
-          # Copy static binaries for standalone builds
+          # Copy binaries with embedded database support
           if [[ -f "bin/glauth-linux-amd64" ]]; then
-            cp bin/glauth-linux-amd64 docker/assets/linux/amd64/glauth-standalone
-            chmod +x docker/assets/linux/amd64/glauth-standalone
+            cp bin/glauth-linux-amd64 docker/assets/linux/amd64/glauth
+            chmod +x docker/assets/linux/amd64/glauth
           fi
           if [[ -f "bin/glauth-linux-arm64" ]]; then
-            cp bin/glauth-linux-arm64 docker/assets/linux/arm64/glauth-standalone
-            chmod +x docker/assets/linux/arm64/glauth-standalone
+            cp bin/glauth-linux-arm64 docker/assets/linux/arm64/glauth
+            chmod +x docker/assets/linux/arm64/glauth
           fi
           if [[ -f "bin/glauth-linux-arm-7" ]]; then
-            cp bin/glauth-linux-arm-7 docker/assets/linux/arm/v7/glauth-standalone
-            chmod +x docker/assets/linux/arm/v7/glauth-standalone
-          fi
-          
-          # Copy the same binaries for plugins builds (they can load plugins)
-          if [[ -f "bin/glauth-linux-amd64" ]]; then
-            cp bin/glauth-linux-amd64 docker/assets/linux/amd64/glauth-plugins
-            chmod +x docker/assets/linux/amd64/glauth-plugins
-          fi
-          if [[ -f "bin/glauth-linux-arm64" ]]; then
-            cp bin/glauth-linux-arm64 docker/assets/linux/arm64/glauth-plugins
-            chmod +x docker/assets/linux/arm64/glauth-plugins
-          fi
-          if [[ -f "bin/glauth-linux-arm-7" ]]; then
-            cp bin/glauth-linux-arm-7 docker/assets/linux/arm/v7/glauth-plugins
-            chmod +x docker/assets/linux/arm/v7/glauth-plugins
-          fi
-          
-          # Copy plugin .so files
-          for plugin in sqlite mysql postgres; do
-            if [[ -f "bin/${plugin}-linux-amd64.so" ]]; then
-              cp "bin/${plugin}-linux-amd64.so" "docker/assets/linux/amd64/${plugin}.so"
-            fi
-            if [[ -f "bin/${plugin}-linux-arm64.so" ]]; then
-              cp "bin/${plugin}-linux-arm64.so" "docker/assets/linux/arm64/${plugin}.so"
-            fi
-            if [[ -f "bin/${plugin}-linux-arm-7.so" ]]; then
-              cp "bin/${plugin}-linux-arm-7.so" "docker/assets/linux/arm/v7/${plugin}.so"
-            fi
-          done
-          
-          # Handle PAM plugin separately (only built for amd64)
-          if [[ -f "bin/pam-linux-amd64.so" ]]; then
-            cp "bin/pam-linux-amd64.so" "docker/assets/linux/amd64/pam.so"
+            cp bin/glauth-linux-arm-7 docker/assets/linux/arm/v7/glauth
+            chmod +x docker/assets/linux/arm/v7/glauth
           fi
 
       - name: Set up Docker Buildx
@@ -349,8 +147,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for standalone
-        id: meta-standalone
+      - name: Extract metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -361,47 +159,19 @@ jobs:
             type=semver,pattern={{major}}
           labels: |
             org.opencontainers.image.title=GLAuth
-            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines
+            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines with embedded database support
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
 
-      - name: Extract metadata for plugins
-        id: meta-plugins
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-plugins
-          tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-          labels: |
-            org.opencontainers.image.title=GLAuth Plugins
-            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines (with plugins support)
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-
-      - name: Build and push standalone Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./v2/docker
-          file: ./v2/docker/Dockerfile-standalone
+          file: ./v2/docker/Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          tags: ${{ steps.meta-standalone.outputs.tags }}
-          labels: ${{ steps.meta-standalone.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push plugins Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./v2/docker
-          file: ./v2/docker/Dockerfile-plugins
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: true
-          tags: ${{ steps.meta-plugins.outputs.tags }}
-          labels: ${{ steps.meta-plugins.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -413,9 +183,6 @@ jobs:
           echo ""
           echo "Main binaries:"
           ls -la glauth-* 2>/dev/null || echo "No main binaries found"
-          echo ""
-          echo "Plugin files:"
-          ls -la *.so 2>/dev/null || echo "No plugin files found"
           echo ""
           echo "SHA256 files:"
           ls -la *.sha256 2>/dev/null || echo "No SHA256 files found"

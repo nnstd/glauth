@@ -12,7 +12,10 @@ require (
 	github.com/arl/statsviz v0.6.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/glauth/ldap v0.0.0-20240419171521-1f14f5c1b4ad
+	github.com/go-sql-driver/mysql v1.6.0
 	github.com/jinzhu/copier v0.4.0
+	github.com/lib/pq v1.10.7
+	github.com/mattn/go-sqlite3 v1.14.15
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.2
@@ -41,14 +44,11 @@ require (
 	github.com/go-asn1-ber/asn1-ber v1.5.7 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
-	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-sqlite3 v1.14.28 // indirect
 	github.com/msteinert/pam v1.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/common v0.65.0 // indirect

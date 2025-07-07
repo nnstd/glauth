@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 
-	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/glauth/ldap"
+	"github.com/nnstd/glauth/v2/pkg/config"
 )
 
 type HelperMaker interface {

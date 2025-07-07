@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"database/sql"
@@ -6,7 +6,6 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/nnstd/glauth/v2/pkg/plugins"
 )
 
 type PostgresBackend struct {
@@ -14,7 +13,7 @@ type PostgresBackend struct {
 
 func NewPostgresHandler(opts ...handler.Option) handler.Handler {
 	backend := PostgresBackend{}
-	return plugins.NewDatabaseHandler(backend, opts...)
+	return NewDatabaseHandler(backend, opts...)
 }
 
 func (b PostgresBackend) GetDriverName() string {

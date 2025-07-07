@@ -13,10 +13,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/GeertJohan/yubigo"
+	"github.com/glauth/ldap"
 	"github.com/nnstd/glauth/v2/internal/monitoring"
 	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/nnstd/glauth/v2/pkg/stats"
-	"github.com/glauth/ldap"
 )
 
 type configHandler struct {
