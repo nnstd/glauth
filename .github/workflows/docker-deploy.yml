@@ -83,6 +83,24 @@ jobs:
           # Prepare plugin dependencies
           make prepare-plugins-build
           
+          # Fix plugin dependency versions to match main module
+          for plugin_dir in pkg/plugins/glauth-*; do
+            if [ -d "$plugin_dir" ] && [ -f "$plugin_dir/go.mod" ]; then
+              echo "Updating dependencies for $plugin_dir"
+              cd "$plugin_dir"
+              
+              # Update to compatible versions from main module
+              go get github.com/glauth/ldap@v0.0.0-20240419171521-1f14f5c1b4ad
+              
+              # Add replace directive to use local main module
+              go mod edit -replace github.com/nnstd/glauth/v2=../../..
+              go mod edit -replace github.com/glauth/glauth/v2=../../..
+              go mod tidy
+              
+              cd ../../..
+            fi
+          done
+          
           # Ensure all dependencies are up to date after plugin preparation
           go mod download
           go mod verify
@@ -94,8 +112,6 @@ jobs:
           if [ -d "pkg/plugins/glauth-sqlite" ]; then
             echo "Building SQLite plugin..."
             cd pkg/plugins/glauth-sqlite
-            go mod download
-            go mod tidy
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -106,8 +122,6 @@ jobs:
           if [ -d "pkg/plugins/glauth-mysql" ]; then
             echo "Building MySQL plugin..."
             cd pkg/plugins/glauth-mysql
-            go mod download
-            go mod tidy
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -118,8 +132,6 @@ jobs:
           if [ -d "pkg/plugins/glauth-postgres" ]; then
             echo "Building PostgreSQL plugin..."
             cd pkg/plugins/glauth-postgres
-            go mod download
-            go mod tidy
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -130,8 +142,6 @@ jobs:
           if [ -d "pkg/plugins/glauth-pam" ]; then
             echo "Building PAM plugin..."
             cd pkg/plugins/glauth-pam
-            go mod download
-            go mod tidy
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
               -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' \
