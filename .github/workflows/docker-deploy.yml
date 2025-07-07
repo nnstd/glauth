@@ -324,6 +324,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: List available files for release
+        working-directory: ./v2/bin
+        run: |
+          echo "Files available for release:"
+          ls -la
+          echo ""
+          echo "Main binaries:"
+          ls -la glauth-* 2>/dev/null || echo "No main binaries found"
+          echo ""
+          echo "Plugin files:"
+          ls -la *.so 2>/dev/null || echo "No plugin files found"
+          echo ""
+          echo "SHA256 files:"
+          ls -la *.sha256 2>/dev/null || echo "No SHA256 files found"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -332,9 +347,6 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: |
-            v2/bin/glauth-*
-            v2/bin/*.so
-            v2/bin/*.sha256
+          files: v2/bin/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
