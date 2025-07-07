@@ -132,18 +132,18 @@ jobs:
           # Build PAM plugin (Linux only due to PAM dependency)
           # Note: Building PAM plugin locally since it requires system PAM headers
           # Only building for linux/amd64 since cross-compilation with CGO and PAM dependencies is complex
-          if [ -d "pkg/plugins/glauth-pam" ]; then
-            echo "Building PAM plugin..."
-            cd pkg/plugins/glauth-pam
-            go mod download
-            go mod verify
-            go mod tidy
+          # if [ -d "pkg/plugins/glauth-pam" ]; then
+          #   echo "Building PAM plugin..."
+          #   cd pkg/plugins/glauth-pam
+          #   go mod download
+          #   go mod verify
+          #   go mod tidy
             
-            # Build for linux/amd64 architecture (runner is amd64)
-            GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o ../../../bin/pam-linux-amd64.so .
+          #   # Build for linux/amd64 architecture (runner is amd64)
+          #   GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o ../../../bin/pam-linux-amd64.so .
             
-            cd ../../..
-          fi
+          #   cd ../../..
+          # fi
           
           # Fix ownership and permissions for plugin files created by xgo
           sudo chown -R $USER:$USER bin/ 2>/dev/null || true
