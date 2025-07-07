@@ -305,6 +305,8 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 			JOIN users u ON c.userid = u.id 
 			WHERE u.name = %s`, h.preparedSymbol)
 
+		h.log.Debug().Str("query", capQuery).Str("userName", user.Name).Msg("FindUser capabilities query")
+
 		capRows, capErr := h.database.cnx.QueryContext(ctx, capQuery, user.Name)
 		if capErr == nil {
 			defer capRows.Close()
@@ -315,7 +317,10 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 					user.Capabilities = append(user.Capabilities, capability)
 				}
 			}
+		} else {
+			h.log.Error().Err(capErr).Msg("FindUser capabilities query failed")
 		}
+
 		// Note: If capabilities query fails, we keep the empty slice initialized above
 	}
 
