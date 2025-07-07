@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"fmt"
-	"plugin"
 
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
@@ -61,31 +60,8 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				handler.LDAPHelper(loh),
 				handler.Tracer(s.tracer),
 			)
-		case "plugin":
-			plug, err := plugin.Open(s.c.Helper.Plugin)
-			if err != nil {
-				return nil, fmt.Errorf("unable to load specified helper plugin: %s", err)
-			}
-			nph, err := plug.Lookup(s.c.Helper.PluginHandler)
-			if err != nil {
-				return nil, errors.New("unable to find 'NewPluginHandler' in loaded helper plugin")
-			}
-			initFunc, ok := nph.(func(...handler.Option) handler.Handler)
-
-			if !ok {
-				return nil, errors.New("loaded helper plugin lacks a proper NewPluginHandler function")
-			}
-			// Normally, here, we would somehow have imported our plugin into our
-			// handler namespace. Oops?
-			helper = initFunc(
-				handler.Logger(&s.log),
-				handler.Config(s.c),
-				handler.YubiAuth(s.yubiAuth),
-				handler.LDAPHelper(loh),
-				handler.Tracer(s.tracer),
-			)
 		default:
-			return nil, fmt.Errorf("unsupported helper %s - must be one of 'config', 'plugin'", s.c.Helper.Datastore)
+			return nil, fmt.Errorf("unsupported helper %s - must be 'config'", s.c.Helper.Datastore)
 		}
 		s.log.Info().Str("datastore", s.c.Helper.Datastore).Msg("Using helper")
 	}
@@ -131,31 +107,6 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				handler.Monitor(s.monitor),
 				handler.Tracer(s.tracer),
 			)
-		case "plugin":
-			plug, err := plugin.Open(backend.Plugin)
-			if err != nil {
-				return nil, fmt.Errorf("unable to load specified backend plugin: %s", err)
-			}
-			nph, err := plug.Lookup(backend.PluginHandler)
-			if err != nil {
-				return nil, errors.New("unable to find 'NewPluginHandler' in loaded backend plugin")
-			}
-			initFunc, ok := nph.(func(...handler.Option) handler.Handler)
-
-			if !ok {
-				return nil, errors.New("loaded backend plugin lacks a proper NewPluginHandler function")
-			}
-			// Normally, here, we would somehow have imported our plugin into our
-			// handler namespace. Oops?
-			h = initFunc(
-				handler.Backend(backend),
-				handler.Logger(&s.log),
-				handler.Config(s.c),
-				handler.YubiAuth(s.yubiAuth),
-				handler.LDAPHelper(loh),
-				handler.Monitor(s.monitor),
-				handler.Tracer(s.tracer),
-			)
 		case "database":
 			var dbType database.DatabaseType
 			if backend.DatabaseType != "" {
@@ -194,7 +145,7 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("unsupported backend %s - must be one of 'config', 'ldap','owncloud', 'database' or 'plugin'", backend.Datastore)
+			return nil, fmt.Errorf("unsupported backend %s - must be one of 'config', 'ldap','owncloud', 'database'", backend.Datastore)
 		}
 		s.log.Info().Str("datastore", backend.Datastore).Int("position", i).Msg("Loading backend")
 

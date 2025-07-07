@@ -9,5 +9,5 @@ import (
 )
 
 func NewEmbed(opts ...handler.Option) (handler.Handler, error) {
-	return nil, errors.New("GLAuth was not built with support for an embedded plugin")
+	return nil, errors.New("GLAuth no longer supports plugins - database support is now embedded directly in the main binary")
 }

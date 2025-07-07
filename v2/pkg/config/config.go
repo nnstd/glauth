@@ -15,8 +15,6 @@ type (
 		GroupFormatAsArray        []string // we will explode GroupFormat on commas
 		SSHKeyAttr                string
 		UseGraphAPI               bool   // For ownCloud backend only
-		Plugin                    string // Path to plugin library, for plugin backend only (deprecated)
-		PluginHandler             string // Name of plugin's main handler function (deprecated)
 		Database                  string // For Database backends only
 		DatabaseType              string // Type of database: sqlite, mysql, postgres (for database datastore)
 		GroupWithSearchCapability string // For PamLinux backend only
@@ -24,12 +22,10 @@ type (
 	}
 
 	Helper struct {
-		Enabled       bool
-		BaseDN        string
-		Datastore     string
-		Plugin        string // Path to plugin library, for plugin backend only
-		PluginHandler string // Name of plugin's main handler function
-		Database      string // For MySQL backend only TODO REname to match plugin
+		Enabled   bool
+		BaseDN    string
+		Datastore string
+		Database  string // For database backends only
 	}
 
 	Frontend struct {
