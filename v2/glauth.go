@@ -298,7 +298,7 @@ func startConfigWatcher() {
 					watcher.Add(configFileLocation) // overwrite
 					isChanged, isRemoved = true, false
 				}
-				
+
 				if isChanged {
 					cfg, err := toml.NewConfig(false, configFileLocation, convertCLIToArgs(&cli))
 					if err != nil {
