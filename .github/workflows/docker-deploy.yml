@@ -1,4 +1,4 @@
-name: Docker Deploy
+name: Release
 
 on:
   push:
@@ -29,108 +29,170 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpam0g-dev
 
-      - name: Build binaries for Docker
+      - name: Install xgo for cross-compilation
+        run: |
+          go install github.com/karalabe/xgo@latest
+
+      - name: Build main binaries for all architectures
         working-directory: ./v2
         run: |
           # Initialize and update submodules for plugins
           git submodule update --init --recursive
           
-          # Build static binary for standalone (no CGO needed)
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make build
-          mkdir -p bin/linuxamd64-static
-          cp bin/linuxamd64/glauth bin/linuxamd64-static/glauth
+          # Use xgo to build for multiple platforms
+          GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
-          # Build plugins version with CGO
+          # Build main binaries using xgo with the same targets as Makefile
+          xgo -v -ldflags="-s -w" -trimpath -go $GO_RELEASE_V -out glauth -dest bin -buildvcs=false \
+            --targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" .
+          
+          # Create sha256 files for each binary
+          cd bin
+          for binary in glauth-*; do
+            if [[ -f "$binary" ]]; then
+              echo "Creating sha256 for $binary"
+              sha256sum "$binary" > "$binary.sha256"
+            fi
+          done
+
+      - name: Build plugins for supported architectures
+        working-directory: ./v2
+        run: |
+          # Prepare plugin dependencies
           make prepare-plugins-build
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 make build
           
-          # Build plugins directly with go build
-          mkdir -p bin/plugins
+          GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
           # Build SQLite plugin
           if [ -d "pkg/plugins/glauth-sqlite" ]; then
             echo "Building SQLite plugin..."
-            cd pkg/plugins/glauth-sqlite
-            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/sqlite.so sqlite.go
-            cd ../../../
+            xgo -v -ldflags="-s -w" -trimpath -go $GO_RELEASE_V -out sqlite -dest bin -buildvcs=false \
+              -buildmode=plugin --targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
+              --pkg pkg/plugins/glauth-sqlite/sqlite.go .
           fi
           
           # Build MySQL plugin
           if [ -d "pkg/plugins/glauth-mysql" ]; then
             echo "Building MySQL plugin..."
-            cd pkg/plugins/glauth-mysql
-            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/mysql.so mysql.go
-            cd ../../../
+            xgo -v -ldflags="-s -w" -trimpath -go $GO_RELEASE_V -out mysql -dest bin -buildvcs=false \
+              -buildmode=plugin --targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
+              --pkg pkg/plugins/glauth-mysql/mysql.go .
           fi
           
           # Build PostgreSQL plugin
           if [ -d "pkg/plugins/glauth-postgres" ]; then
             echo "Building PostgreSQL plugin..."
-            cd pkg/plugins/glauth-postgres
-            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=plugin -o ../../../bin/plugins/postgres.so postgres.go
-            cd ../../../
+            xgo -v -ldflags="-s -w" -trimpath -go $GO_RELEASE_V -out postgres -dest bin -buildvcs=false \
+              -buildmode=plugin --targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
+              --pkg pkg/plugins/glauth-postgres/postgres.go .
           fi
           
-          # Debug: List what files were created
-          echo "Files in bin directory:"
-          ls -la bin/ || true
-          echo "Files in bin/plugins directory:"
-          ls -la bin/plugins/ || true
+          # Build PAM plugin (Linux only due to PAM dependency)
+          if [ -d "pkg/plugins/glauth-pam" ]; then
+            echo "Building PAM plugin..."
+            xgo -v -ldflags="-s -w" -trimpath -go $GO_RELEASE_V -out pam -dest bin -buildvcs=false \
+              -buildmode=plugin --targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
+              --pkg pkg/plugins/glauth-pam/pam.go --bringupcmd 'apt update && apt install -y libpam0g-dev' .
+          fi
+          
+          # Rename plugin files to add .so extension
+          cd bin
+          for lib in $(ls *-* | grep -v \.so$ | grep -v glauth-); do 
+            if [[ -f "$lib" ]]; then
+              echo "Renaming $lib to $lib.so"
+              mv "$lib" "$lib.so"
+            fi
+          done
+          
+          # Create sha256 files for each plugin
+          for plugin in *.so; do
+            if [[ -f "$plugin" ]]; then
+              echo "Creating sha256 for $plugin"
+              sha256sum "$plugin" > "$plugin.sha256"
+            fi
+          done
+
+      - name: List all built artifacts
+        working-directory: ./v2/bin
+        run: |
+          echo "Built artifacts:"
+          ls -la
+          echo ""
+          echo "SHA256 files:"
+          ls -la *.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: v2/bin/
+
+  build-docker-and-release:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: v2/bin/
+
+      - name: Extract tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Prepare Docker assets
         working-directory: ./v2
         run: |
           # Create platform-specific directories for Docker build
-          mkdir -p docker/assets/linux/amd64
+          mkdir -p docker/assets/linux/amd64 docker/assets/linux/arm64 docker/assets/linux/arm/v7
           
-          # Copy static binary for standalone builds
-          cp bin/linuxamd64-static/glauth docker/assets/linux/amd64/glauth-standalone
+          # Copy static binaries for standalone builds
+          if [[ -f "bin/glauth-linux-amd64" ]]; then
+            cp bin/glauth-linux-amd64 docker/assets/linux/amd64/glauth-standalone
+            chmod +x docker/assets/linux/amd64/glauth-standalone
+          fi
+          if [[ -f "bin/glauth-linux-arm64" ]]; then
+            cp bin/glauth-linux-arm64 docker/assets/linux/arm64/glauth-standalone
+            chmod +x docker/assets/linux/arm64/glauth-standalone
+          fi
+          if [[ -f "bin/glauth-linux-arm-7" ]]; then
+            cp bin/glauth-linux-arm-7 docker/assets/linux/arm/v7/glauth-standalone
+            chmod +x docker/assets/linux/arm/v7/glauth-standalone
+          fi
           
-          # Copy CGO-enabled binary for plugins builds
-          cp bin/linuxamd64/glauth docker/assets/linux/amd64/glauth-plugins
+          # Copy the same binaries for plugins builds (they can load plugins)
+          if [[ -f "bin/glauth-linux-amd64" ]]; then
+            cp bin/glauth-linux-amd64 docker/assets/linux/amd64/glauth-plugins
+            chmod +x docker/assets/linux/amd64/glauth-plugins
+          fi
+          if [[ -f "bin/glauth-linux-arm64" ]]; then
+            cp bin/glauth-linux-arm64 docker/assets/linux/arm64/glauth-plugins
+            chmod +x docker/assets/linux/arm64/glauth-plugins
+          fi
+          if [[ -f "bin/glauth-linux-arm-7" ]]; then
+            cp bin/glauth-linux-arm-7 docker/assets/linux/arm/v7/glauth-plugins
+            chmod +x docker/assets/linux/arm/v7/glauth-plugins
+          fi
           
-          # Set executable permissions
-          chmod +x docker/assets/linux/amd64/glauth-standalone
-          chmod +x docker/assets/linux/amd64/glauth-plugins
-          
-          # Copy plugin .so files built manually
-          if [ -f "bin/plugins/sqlite.so" ]; then
-            cp bin/plugins/sqlite.so docker/assets/linux/amd64/sqlite.so
-          fi
-          if [ -f "bin/plugins/mysql.so" ]; then
-            cp bin/plugins/mysql.so docker/assets/linux/amd64/mysql.so
-          fi
-          if [ -f "bin/plugins/postgres.so" ]; then
-            cp bin/plugins/postgres.so docker/assets/linux/amd64/postgres.so
-          fi
-          if [ -f "bin/plugins/pam.so" ]; then
-            cp bin/plugins/pam.so docker/assets/linux/amd64/pam.so
-          fi
-
-      - name: Upload Docker assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-assets
-          path: v2/docker/assets/
-
-  build-and-push:
-    needs: build-binaries
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        variant: [standalone, plugins]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Docker assets
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-assets
-          path: v2/docker/assets/
+          # Copy plugin .so files
+          for plugin in sqlite mysql postgres pam; do
+            if [[ -f "bin/${plugin}-linux-amd64.so" ]]; then
+              cp "bin/${plugin}-linux-amd64.so" "docker/assets/linux/amd64/${plugin}.so"
+            fi
+            if [[ -f "bin/${plugin}-linux-arm64.so" ]]; then
+              cp "bin/${plugin}-linux-arm64.so" "docker/assets/linux/arm64/${plugin}.so"
+            fi
+            if [[ -f "bin/${plugin}-linux-arm-7.so" ]]; then
+              cp "bin/${plugin}-linux-arm-7.so" "docker/assets/linux/arm/v7/${plugin}.so"
+            fi
+          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -142,30 +204,73 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      - name: Extract metadata for standalone
+        id: meta-standalone
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.variant }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
           labels: |
-            org.opencontainers.image.title=GLAuth ${{ matrix.variant }}
-            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines (${{ matrix.variant }} variant)
+            org.opencontainers.image.title=GLAuth
+            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
 
-      - name: Build and push Docker image
+      - name: Extract metadata for plugins
+        id: meta-plugins
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-plugins
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=GLAuth Plugins
+            org.opencontainers.image.description=A simple LDAP server for development, home use, or CI pipelines (with plugins support)
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push standalone Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./v2/docker
-          file: ./v2/docker/Dockerfile-${{ matrix.variant }}
-          platforms: linux/amd64
+          file: ./v2/docker/Dockerfile-standalone
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-standalone.outputs.tags }}
+          labels: ${{ steps.meta-standalone.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max 
+          cache-to: type=gha,mode=max
+
+      - name: Build and push plugins Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./v2/docker
+          file: ./v2/docker/Dockerfile-plugins
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta-plugins.outputs.tags }}
+          labels: ${{ steps.meta-plugins.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            v2/bin/glauth-*
+            v2/bin/*.so
+            v2/bin/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
