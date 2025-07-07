@@ -145,7 +145,7 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("unsupported backend %s - must be one of 'config', 'ldap','owncloud', 'database'", backend.Datastore)
+			return nil, fmt.Errorf("unsupported backend '%s' - must be one of 'config', 'ldap', 'owncloud', 'database'", backend.Datastore)
 		}
 		s.log.Info().Str("datastore", backend.Datastore).Int("position", i).Msg("Loading backend")
 

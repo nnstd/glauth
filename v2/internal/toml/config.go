@@ -432,7 +432,7 @@ func validateConfig(cfg *config.Config) (*config.Config, error) {
 		case "database":
 		case "embed":
 		default:
-			return cfg, fmt.Errorf("invalid backend %s - must be 'config', 'ldap', 'owncloud', 'database' or 'embed'", cfg.Backends[i].Datastore)
+			return cfg, fmt.Errorf("invalid backend '%s' - must be 'config', 'ldap', 'owncloud', 'database' or 'embed'", cfg.Backends[i].Datastore)
 		}
 	}
 

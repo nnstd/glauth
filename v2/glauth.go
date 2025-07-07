@@ -92,7 +92,7 @@ func (c *CheckConfigCmd) Run(cliCtx *CLI) error {
 	}
 	cfg, err := toml.NewConfig(true, cliCtx.Config, convertCLIToArgs(cliCtx))
 	if err != nil {
-		return fmt.Errorf("configuration file error: %w", err)
+		return fmt.Errorf("configuration file error on check-config: %w", err)
 	}
 	_ = cfg // cfg is validated during creation
 	fmt.Println("Config file seems ok (but I am not checking much at this time)")
