@@ -89,13 +89,26 @@ jobs:
               echo "Updating dependencies for $plugin_dir"
               cd "$plugin_dir"
               
-              # Update to compatible versions from main module
-              go get github.com/glauth/ldap@v0.0.0-20240419171521-1f14f5c1b4ad
+              # Clear the module cache to avoid conflicts
+              go clean -modcache || true
               
-              # Add replace directive to use local main module
+              # Remove all problematic requirements and replace with compatible versions
+              go mod edit -droprequire github.com/glauth/ldap || true
+              go mod edit -droprequire github.com/glauth/glauth/v2 || true
+              go mod edit -droprequire github.com/nnstd/glauth/v2 || true
+              
+              # Add replace directives to use local main module
               go mod edit -replace github.com/nnstd/glauth/v2=../../..
               go mod edit -replace github.com/glauth/glauth/v2=../../..
+              go mod edit -replace github.com/glauth/ldap@v0.0.0-20210720162743-7f8d1e44eeba=github.com/glauth/ldap@v0.0.0-20240419171521-1f14f5c1b4ad
+              
+              # Update to compatible versions from main module
+              go get github.com/glauth/ldap@v0.0.0-20240419171521-1f14f5c1b4ad
               go mod tidy
+              
+              # Show the updated go.mod for debugging
+              echo "Updated go.mod for $plugin_dir:"
+              cat go.mod
               
               cd ../../..
             fi
