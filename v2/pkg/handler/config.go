@@ -70,12 +70,14 @@ func (h configHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result 
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "bind", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return h.ldohelper.Bind(ctx, h, bindDN, bindSimplePw, conn)
 }
 
@@ -85,12 +87,14 @@ func (h configHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn 
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "search", "status": fmt.Sprintf("%v", result.ResultCode)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return h.ldohelper.Search(ctx, h, bindDN, searchReq, conn)
 }
 
@@ -100,12 +104,14 @@ func (h configHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "add", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
@@ -115,12 +121,14 @@ func (h configHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.C
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "modify", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
@@ -130,31 +138,49 @@ func (h configHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (r
 	defer span.End()
 
 	start := time.Now()
+
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
 			map[string]string{"operation": "delete", "status": fmt.Sprintf("%v", result)},
 			time.Since(start).Seconds(),
 		)
 	}()
+
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
 func (h configHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (f bool, u config.User, err error) {
 	_, span := h.tracer.Start(ctx, "handler.configHandler.FindUser")
 	defer span.End()
+
+	h.log.Info().Int("users", len(h.cfg.Users)).Msg("users in FindUser")
+	h.log.Debug().Str("userName", userName).Bool("searchByUPN", searchByUPN).Msg("need find in FindUser")
+
 	user := config.User{}
 	found := false
 
+	h.log.Debug().Int("users", len(h.cfg.Users)).Msg("users in FindUser")
+
 	for _, u := range h.cfg.Users {
+		h.log.Debug().Str("userName", userName).Msg("found user in FindUser")
+
 		if searchByUPN {
 			if strings.EqualFold(u.Mail, userName) {
+				h.log.Debug().Str("userName", userName).Msg("upn match in FindUser")
+
 				found = true
 				user = u
+			} else {
+				h.log.Debug().Str("userName", userName).Msg("upn not match in FindUser")
 			}
 		} else {
 			if strings.EqualFold(u.Name, userName) {
+				h.log.Debug().Str("userName", userName).Msg("name match in FindUser")
+
 				found = true
 				user = u
+			} else {
+				h.log.Debug().Str("userName", userName).Msg("name not match in FindUser")
 			}
 		}
 	}
