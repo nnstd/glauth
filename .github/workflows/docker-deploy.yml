@@ -88,8 +88,8 @@ jobs:
           go mod verify
           go mod tidy
           
-          # Create vendor directory to ensure consistent builds
-          go mod vendor
+          # Disable workspace mode for consistent plugin builds
+          export GOWORK=off
           
           GO_RELEASE_V=$(go version | { read _ _ v _; echo ${v#go}; })
           
@@ -108,11 +108,11 @@ jobs:
             
             # Add plugin-specific dependencies
             go mod edit -require=github.com/mattn/go-sqlite3@v1.14.15
-            go mod tidy
+            GOWORK=off go mod tidy
             
-            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest ../../../bin \
+            GOWORK=off xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
             
             # Restore original go.mod if it existed
             if [ -f "./go.mod.backup" ]; then
@@ -138,11 +138,11 @@ jobs:
             
             # Add plugin-specific dependencies
             go mod edit -require=github.com/go-sql-driver/mysql@v1.6.0
-            go mod tidy
+            GOWORK=off go mod tidy
             
-            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest ../../../bin \
+            GOWORK=off xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
             
             # Restore original go.mod if it existed
             if [ -f "./go.mod.backup" ]; then
@@ -168,11 +168,11 @@ jobs:
             
             # Add plugin-specific dependencies
             go mod edit -require=github.com/lib/pq@v1.10.7
-            go mod tidy
+            GOWORK=off go mod tidy
             
-            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest ../../../bin \
+            GOWORK=off xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct,GOWORK=off" .
             
             # Restore original go.mod if it existed
             if [ -f "./go.mod.backup" ]; then
