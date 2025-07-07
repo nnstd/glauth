@@ -130,16 +130,18 @@ jobs:
           fi
           
           # Build PAM plugin (Linux only due to PAM dependency)
+          # Note: Building PAM plugin locally since it requires system PAM headers
+          # Only building for linux/amd64 since cross-compilation with CGO and PAM dependencies is complex
           if [ -d "pkg/plugins/glauth-pam" ]; then
             echo "Building PAM plugin..."
             cd pkg/plugins/glauth-pam
             go mod download
             go mod verify
             go mod tidy
-            xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest ../../../bin \
-              -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
-              --bringupcmd 'apt update && apt install -y libpam0g-dev' \
-              -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
+            
+            # Build for linux/amd64 architecture (runner is amd64)
+            GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -buildmode=plugin -o ../../../bin/pam-linux-amd64.so .
+            
             cd ../../..
           fi
           
@@ -239,7 +241,7 @@ jobs:
           fi
           
           # Copy plugin .so files
-          for plugin in sqlite mysql postgres pam; do
+          for plugin in sqlite mysql postgres; do
             if [[ -f "bin/${plugin}-linux-amd64.so" ]]; then
               cp "bin/${plugin}-linux-amd64.so" "docker/assets/linux/amd64/${plugin}.so"
             fi
@@ -250,6 +252,11 @@ jobs:
               cp "bin/${plugin}-linux-arm-7.so" "docker/assets/linux/arm/v7/${plugin}.so"
             fi
           done
+          
+          # Handle PAM plugin separately (only built for amd64)
+          if [[ -f "bin/pam-linux-amd64.so" ]]; then
+            cp "bin/pam-linux-amd64.so" "docker/assets/linux/amd64/pam.so"
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
