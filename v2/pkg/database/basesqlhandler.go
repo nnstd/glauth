@@ -245,6 +245,9 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 		).Scan(&user.Name, &user.UIDNumber, &user.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr)
 	}
 
+	// Initialize capabilities to empty slice by default
+	user.Capabilities = []config.Capability{}
+
 	if err2 == nil {
 		found = true
 
@@ -294,6 +297,26 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 		if sshKeys != "" {
 			user.SSHKeys = strings.Split(sshKeys, "\n")
 		}
+
+		// Query capabilities for this user using JOIN for better performance
+		capQuery := fmt.Sprintf(`
+			SELECT c.action, c.object 
+			FROM capabilities c 
+			JOIN users u ON c.userid = u.id 
+			WHERE u.name = %s`, h.preparedSymbol)
+
+		capRows, capErr := h.database.cnx.QueryContext(ctx, capQuery, user.Name)
+		if capErr == nil {
+			defer capRows.Close()
+			for capRows.Next() {
+				var capability config.Capability
+				scanErr := capRows.Scan(&capability.Action, &capability.Object)
+				if scanErr == nil {
+					user.Capabilities = append(user.Capabilities, capability)
+				}
+			}
+		}
+		// Note: If capabilities query fails, we keep the empty slice initialized above
 	}
 
 	return found, user, err2
@@ -574,9 +597,9 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
-		`
-			SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups
-			FROM users u`)
+		`SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups
+		FROM users u`,
+	)
 	if err != nil {
 		// Silent fail... for now
 		return []string{}
