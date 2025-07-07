@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"github.com/GeertJohan/yubigo"
+	"github.com/glauth/ldap"
 	"github.com/msteinert/pam"
 	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/nnstd/ldap"
 	"github.com/rs/zerolog"
 )
 
