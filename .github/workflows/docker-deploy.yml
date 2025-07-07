@@ -64,6 +64,10 @@ jobs:
             -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64,windows/amd64,windows/386" \
             -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           
+          # Fix ownership and permissions for files created by xgo (which runs as root in docker)
+          sudo chown -R $USER:$USER bin/ 2>/dev/null || true
+          chmod -R 755 bin/ 2>/dev/null || true
+          
           # Create sha256 files for each binary
           cd bin
           for binary in glauth-*; do
@@ -119,6 +123,10 @@ jobs:
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
           fi
           
+          # Fix ownership and permissions for plugin files created by xgo
+          sudo chown -R $USER:$USER bin/ 2>/dev/null || true
+          chmod -R 755 bin/ 2>/dev/null || true
+          
           # Rename plugin files to add .so extension
           cd bin
           for lib in $(ls *-* | grep -v \.so$ | grep -v glauth-); do 
@@ -143,7 +151,12 @@ jobs:
           ls -la
           echo ""
           echo "SHA256 files:"
-          ls -la *.sha256
+          ls -la *.sha256 2>/dev/null || echo "No SHA256 files found yet"
+          
+          # Ensure all files have proper permissions and ownership
+          sudo chown -R runner:runner . 2>/dev/null || true
+          chmod -R 644 *.sha256 2>/dev/null || true
+          chmod -R 755 glauth-* *.so 2>/dev/null || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
