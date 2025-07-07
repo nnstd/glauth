@@ -18,10 +18,10 @@ import (
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/glauth/glauth/v2/internal/monitoring"
-	"github.com/glauth/glauth/v2/pkg/config"
-	"github.com/glauth/glauth/v2/pkg/stats"
 	"github.com/glauth/ldap"
+	"github.com/nnstd/glauth/v2/internal/monitoring"
+	"github.com/nnstd/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/stats"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -81,7 +81,7 @@ func NewLdapHandler(opts ...Option) Handler {
 		monitor:  options.Monitor,
 		tracer:   options.Tracer,
 	}
-	
+
 	// parse LDAP URLs
 	for _, ldapurl := range handler.backend.Servers {
 		l, err := parseURL(ldapurl)

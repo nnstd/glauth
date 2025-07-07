@@ -10,82 +10,57 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/GeertJohan/yubigo"
 	"github.com/arl/statsviz"
-	docopt "github.com/docopt/docopt-go"
 	"github.com/fsnotify/fsnotify"
-	"github.com/glauth/glauth/v2/internal/monitoring"
-	_tls "github.com/glauth/glauth/v2/internal/tls"
-	"github.com/glauth/glauth/v2/internal/toml"
-	"github.com/glauth/glauth/v2/internal/tracing"
-	"github.com/glauth/glauth/v2/internal/version"
-	"github.com/glauth/glauth/v2/pkg/config"
-	"github.com/glauth/glauth/v2/pkg/frontend"
-	"github.com/glauth/glauth/v2/pkg/logging"
-	"github.com/glauth/glauth/v2/pkg/server"
-	"github.com/glauth/glauth/v2/pkg/stats"
 	"github.com/jinzhu/copier"
+	"github.com/nnstd/glauth/v2/internal/monitoring"
+	_tls "github.com/nnstd/glauth/v2/internal/tls"
+	"github.com/nnstd/glauth/v2/internal/toml"
+	"github.com/nnstd/glauth/v2/internal/tracing"
+	"github.com/nnstd/glauth/v2/internal/version"
+	"github.com/nnstd/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/frontend"
+	"github.com/nnstd/glauth/v2/pkg/logging"
+	"github.com/nnstd/glauth/v2/pkg/server"
+	"github.com/nnstd/glauth/v2/pkg/stats"
 
+	"github.com/alecthomas/kong"
 	"github.com/rs/zerolog"
 )
 
-const programName = "glauth"
+// CLI represents the command-line interface structure
+type CLI struct {
+	// Global flags
+	Config       string `short:"c" type:"path" help:"Config file or S3 URL."`
+	AWSKeyID     string `short:"K" help:"AWS Key ID for S3 config access."`
+	AWSSecretKey string `short:"S" help:"AWS Secret Key for S3 config access."`
+	AWSRegion    string `short:"r" default:"us-east-1" help:"AWS Region."`
+	AWSEndpoint  string `help:"Custom S3 endpoint URL." name:"aws_endpoint_url"`
 
-var usage = `glauth: securely expose your LDAP for external auth
+	// Server addresses
+	LDAP      string `help:"Listen address for the LDAP server." name:"ldap"`
+	LDAPS     string `help:"Listen address for the LDAPS server." name:"ldaps"`
+	LDAPSCert string `help:"Path to cert file for the LDAPS server." name:"ldaps-cert" type:"path"`
+	LDAPSKey  string `help:"Path to key file for the LDAPS server." name:"ldaps-key" type:"path"`
 
-Usage:
-  glauth [options] -c <file|s3 url>
-  glauth -h --help
-  glauth --version
+	// Commands
+	Run         RunCmd         `cmd:"" help:"Start the LDAP server (default)." default:"1"`
+	CheckConfig CheckConfigCmd `cmd:"" help:"Check configuration file and exit."`
+	Version     VersionCmd     `cmd:"" help:"Show version information."`
+}
 
-Options:
-  -c, --config <file>       Config file.
-  -K <aws_key_id>           AWS Key ID.
-  -S <aws_secret_key>       AWS Secret Key.
-  -r <aws_region>           AWS Region [default: us-east-1].
-  --aws_endpoint_url <url>  Custom S3 endpoint.
-  --ldap <address>          Listen address for the LDAP server.
-  --ldaps <address>         Listen address for the LDAPS server.
-  --ldaps-cert <cert-file>  Path to cert file for the LDAPS server.
-  --ldaps-key <key-file>    Path to key file for the LDAPS server.
-  --check-config            Check configuration file and exit.
-  -h, --help                Show this screen.
-  --version                 Show version.
-`
+// RunCmd represents the main server run command
+type RunCmd struct{}
 
-var (
-	log      zerolog.Logger
-	args     map[string]interface{}
-	yubiAuth *yubigo.YubiAuth
-
-	activeConfig = &config.Config{}
-)
-
-func main() {
-
-	if err := parseArgs(); err != nil {
-		fmt.Println("Could not parse command-line arguments")
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	checkConfig := false
-	if cc, ok := args["--check-config"]; ok {
-		if cc == true {
-			checkConfig = true
-		}
+// Run executes the main server command
+func (c *RunCmd) Run(cliCtx *CLI) error {
+	if cliCtx.Config == "" {
+		return fmt.Errorf("config file is required to run the server (use -c/--config)")
 	}
 
-	cfg, err := toml.NewConfig(checkConfig, getConfigLocation(), args)
-
+	cfg, err := toml.NewConfig(false, cliCtx.Config, convertCLIToArgs(cliCtx))
 	if err != nil {
-		fmt.Println("Configuration file error")
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	if checkConfig {
-		fmt.Println("Config file seems ok (but I am not checking much at this time)")
-		return
+		return fmt.Errorf("configuration file error: %w", err)
 	}
 
 	if err := copier.Copy(activeConfig, cfg); err != nil {
@@ -94,18 +69,101 @@ func main() {
 
 	log = logging.InitLogging(activeConfig.Debug, activeConfig.Syslog, activeConfig.StructuredLog)
 
-	if !checkConfig {
-		if cfg.Debug {
-			log.Info().Msg("Debugging enabled")
-		}
-		if cfg.Syslog {
-			log.Info().Msg("Syslog enabled")
-		}
+	if cfg.Debug {
+		log.Info().Msg("Debugging enabled")
+	}
+	if cfg.Syslog {
+		log.Info().Msg("Syslog enabled")
 	}
 
 	log.Info().Msg("AP start")
 
 	startService()
+	return nil
+}
+
+// CheckConfigCmd represents the check-config command
+type CheckConfigCmd struct{}
+
+// Run executes the check-config command
+func (c *CheckConfigCmd) Run(cliCtx *CLI) error {
+	if cliCtx.Config == "" {
+		return fmt.Errorf("config file is required for check-config command")
+	}
+	cfg, err := toml.NewConfig(true, cliCtx.Config, convertCLIToArgs(cliCtx))
+	if err != nil {
+		return fmt.Errorf("configuration file error: %w", err)
+	}
+	_ = cfg // cfg is validated during creation
+	fmt.Println("Config file seems ok (but I am not checking much at this time)")
+	return nil
+}
+
+// VersionCmd represents the version command
+type VersionCmd struct{}
+
+// Run executes the version command
+func (c *VersionCmd) Run() error {
+	fmt.Println(version.GetVersion())
+	return nil
+}
+
+// convertCLIToArgs converts the Kong CLI struct to the args map format expected by toml.NewConfig
+func convertCLIToArgs(cli *CLI) map[string]interface{} {
+	args := make(map[string]interface{})
+
+	args["--config"] = cli.Config
+	if cli.AWSKeyID != "" {
+		args["-K"] = cli.AWSKeyID
+	}
+	if cli.AWSSecretKey != "" {
+		args["-S"] = cli.AWSSecretKey
+	}
+	if cli.AWSRegion != "" {
+		args["-r"] = cli.AWSRegion
+	}
+	if cli.AWSEndpoint != "" {
+		args["--aws_endpoint_url"] = cli.AWSEndpoint
+	}
+	if cli.LDAP != "" {
+		args["--ldap"] = cli.LDAP
+	}
+	if cli.LDAPS != "" {
+		args["--ldaps"] = cli.LDAPS
+	}
+	if cli.LDAPSCert != "" {
+		args["--ldaps-cert"] = cli.LDAPSCert
+	}
+	if cli.LDAPSKey != "" {
+		args["--ldaps-key"] = cli.LDAPSKey
+	}
+
+	return args
+}
+
+var (
+	log zerolog.Logger
+	cli CLI
+
+	activeConfig = &config.Config{}
+)
+
+func main() {
+	ctx := kong.Parse(&cli,
+		kong.Name("glauth"),
+		kong.Description("securely expose your LDAP for external auth"),
+		kong.UsageOnError(),
+		kong.ConfigureHelp(kong.HelpOptions{
+			Compact: true,
+		}),
+	)
+
+	// Execute the parsed command
+	err := ctx.Run()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func startService() {
@@ -202,7 +260,7 @@ func startService() {
 }
 
 func startConfigWatcher() {
-	configFileLocation := getConfigLocation()
+	configFileLocation := cli.Config
 	if !activeConfig.WatchConfig || strings.HasPrefix(configFileLocation, "s3://") {
 		return
 	}
@@ -220,6 +278,7 @@ func startConfigWatcher() {
 			select {
 			case event := <-watcher.Events:
 				log.Info().Str("e", event.Op.String()).Msg("watcher got event")
+
 				if event.Op&fsnotify.Write == fsnotify.Write {
 					isChanged = true
 				} else if event.Op&fsnotify.Remove == fsnotify.Remove { // vim edit file with rename/remove
@@ -232,16 +291,16 @@ func startConfigWatcher() {
 			case <-ticker.C:
 				// wakeup, try finding removed config
 			}
+
 			if _, err := os.Stat(configFileLocation); !os.IsNotExist(err) && (isRemoved || isChanged) {
 				if isRemoved {
 					log.Info().Str("file", configFileLocation).Msg("rewatching config")
 					watcher.Add(configFileLocation) // overwrite
 					isChanged, isRemoved = true, false
 				}
+				
 				if isChanged {
-
-					cfg, err := toml.NewConfig(false, configFileLocation, args)
-
+					cfg, err := toml.NewConfig(false, configFileLocation, convertCLIToArgs(&cli))
 					if err != nil {
 						log.Info().Err(err).Msg("Could not reload config. Holding on to old config")
 					} else {
@@ -258,18 +317,4 @@ func startConfigWatcher() {
 	}()
 
 	watcher.Add(configFileLocation)
-}
-
-func parseArgs() error {
-	var err error
-
-	if args, err = docopt.Parse(usage, nil, true, version.GetVersion(), false); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getConfigLocation() string {
-	return args["--config"].(string)
 }

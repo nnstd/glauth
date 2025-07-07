@@ -18,9 +18,9 @@ import (
 
 	"github.com/GeertJohan/yubigo"
 	"github.com/IGLOU-EU/go-wildcard/v2"
-	"github.com/glauth/glauth/v2/pkg/config"
-	"github.com/glauth/glauth/v2/pkg/stats"
 	"github.com/glauth/ldap"
+	"github.com/nnstd/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/stats"
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 )

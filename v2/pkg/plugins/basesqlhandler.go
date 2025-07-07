@@ -20,9 +20,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/GeertJohan/yubigo"
-	"github.com/glauth/glauth/v2/pkg/config"
-	"github.com/glauth/glauth/v2/pkg/handler"
-	"github.com/glauth/glauth/v2/pkg/stats"
+	"github.com/nnstd/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/handler"
+	"github.com/nnstd/glauth/v2/pkg/stats"
 	"github.com/glauth/ldap"
 )
 

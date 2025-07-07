@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/glauth/glauth/v2/internal/monitoring"
-	"github.com/glauth/glauth/v2/pkg/assets"
+	"github.com/nnstd/glauth/v2/internal/monitoring"
+	"github.com/nnstd/glauth/v2/pkg/assets"
 )
 
 // RunAPI provides a basic REST API

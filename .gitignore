@@ -4,6 +4,7 @@ v2/bin
 v2/docker/assets/linux
 v2/gl.db
 v2/buildlogs
+v2/glauth
 .vscode/
 
 # Output of the go coverage tool, specifically when used with LiteIDE

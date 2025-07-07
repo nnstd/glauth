@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 
-	"github.com/glauth/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/glauth/ldap"
 )
 

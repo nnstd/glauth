@@ -7,8 +7,8 @@ import (
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/glauth/glauth/v2/internal/monitoring"
-	"github.com/glauth/glauth/v2/pkg/config"
+	"github.com/nnstd/glauth/v2/internal/monitoring"
+	"github.com/nnstd/glauth/v2/pkg/config"
 )
 
 // Option defines a single option function.

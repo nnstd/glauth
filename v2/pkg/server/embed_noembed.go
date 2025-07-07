@@ -5,7 +5,7 @@ package server
 import (
 	"errors"
 
-	"github.com/glauth/glauth/v2/pkg/handler"
+	"github.com/nnstd/glauth/v2/pkg/handler"
 )
 
 func NewEmbed(opts ...handler.Option) (handler.Handler, error) {
