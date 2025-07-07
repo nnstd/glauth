@@ -97,6 +97,11 @@ jobs:
             go mod download
             go mod verify
             go mod tidy
+            
+            # Add replace directive to use local version of main module
+            echo "replace github.com/nnstd/glauth/v2 => ../../.." >> go.mod
+            go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out sqlite -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -110,6 +115,11 @@ jobs:
             go mod download
             go mod verify
             go mod tidy
+            
+            # Add replace directive to use local version of main module
+            echo "replace github.com/nnstd/glauth/v2 => ../../.." >> go.mod
+            go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out mysql -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -123,6 +133,11 @@ jobs:
             go mod download
             go mod verify
             go mod tidy
+            
+            # Add replace directive to use local version of main module
+            echo "replace github.com/nnstd/glauth/v2 => ../../.." >> go.mod
+            go mod tidy
+            
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out postgres -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7,darwin/amd64,darwin/arm64" \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
@@ -137,6 +152,10 @@ jobs:
             cd pkg/plugins/glauth-pam
             go mod download
             go mod verify
+            go mod tidy
+            
+            # Add replace directive to use local version of main module
+            echo "replace github.com/nnstd/glauth/v2 => ../../.." >> go.mod
             go mod tidy
             
             # Build for linux/amd64 architecture (runner is amd64)
