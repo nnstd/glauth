@@ -138,7 +138,7 @@ jobs:
             go mod tidy
             xgo -image techknowlogick/xgo:latest -v -ldflags="-s -w" -go $GO_RELEASE_V -out pam -dest ../../../bin \
               -buildmode=plugin -targets="linux/amd64,linux/386,linux/arm64,linux/arm-7" \
-              -deps 'https://github.com/linux-pam/linux-pam/releases/download/v1.5.2/Linux-PAM-1.5.2.tar.xz' \
+              --bringupcmd 'apt update && apt install -y libpam0g-dev' \
               -env="GO111MODULE=on,GOPROXY=https://proxy.golang.org,direct" .
             cd ../../..
           fi
