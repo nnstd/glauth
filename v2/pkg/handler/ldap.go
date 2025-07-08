@@ -125,6 +125,7 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ld
 	// until we find our user or die of boredom.
 	user := config.User{}
 	found := false
+	
 	for i, handler := range h.handlers.Handlers {
 		found, user, _ = handler.FindUser(ctx, userName, false)
 		if found {

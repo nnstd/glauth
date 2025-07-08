@@ -1,0 +1,36 @@
+debug = true
+syslog = true
+
+[ldap]
+  enabled = true
+  # run on a non privileged port
+  listen = "0.0.0.0:3893"
+  tls = false
+
+[ldaps]
+  enabled = false
+
+[backend]
+  datastore = "config"
+  baseDN = "dc=glauth,dc=com"
+
+[[users]]
+  name = "magicfun"
+  uidnumber = 1000
+  primarygroup = 1000
+  mail = "admin@glauth.com"
+  loginShell = "/bin/bash"
+  homeDir = "/home/administrator"
+  passsha256 = "cf80cd8aed482d5d1527d7dc72fceff84e6326592848447d2dc0b0e87dfc9a90"
+    [[users.capabilities]]
+    action = "search"
+    object = "dc=glauth,dc=com"
+
+[[groups]]
+  name = "administrators"
+  gidnumber = 1000
+
+[api]
+  enabled = true
+  tls = false # enable TLS for production!!
+  listen = "0.0.0.0:5555"

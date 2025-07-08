@@ -161,6 +161,7 @@ func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bind
 	if user.PassAppCustom != nil {
 		err := user.PassAppCustom(user, untouchedBindSimplePw)
 		if err != nil {
+			h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Str("error", err.Error()).Msg("Authentication failed: Custom app authentication failed - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Str("error", err.Error()).Msg("Attempt to bind app custom auth failed")
 			return ldap.LDAPResultInvalidCredentials, nil
 		}
@@ -172,6 +173,7 @@ func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bind
 
 	// Then ensure the OTP is valid before checking
 	if !validotp {
+		h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Authentication failed: Invalid OTP token - returning Invalid credentials")
 		h.GetLog().Info().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("invalid OTP token")
 		return ldap.LDAPResultInvalidCredentials, nil
 	}
@@ -180,19 +182,26 @@ func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bind
 	if user.PassBcrypt != "" {
 		decoded, err := hex.DecodeString(user.PassBcrypt)
 		if err != nil {
+			h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Authentication failed: Failed to decode bcrypt hash - returning Invalid credentials")
 			h.GetLog().Info().Str("incorrect stored hash", "(omitted)").Msg("invalid credentials")
 			return ldap.LDAPResultInvalidCredentials, nil
 		}
 		if bcrypt.CompareHashAndPassword(decoded, []byte(bindSimplePw)) != nil {
+			h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Authentication failed: Bcrypt password comparison failed - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("invalid credentials")
 			l.maybePutInTimeout(ctx, h, conn, true)
 			return ldap.LDAPResultInvalidCredentials, nil
 		}
 	}
+
 	if user.PassSHA256 != "" {
+		h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Authentication: SHA256 password comparison")
+
 		hash := sha256.New()
 		hash.Write([]byte(bindSimplePw))
+
 		if user.PassSHA256 != hex.EncodeToString(hash.Sum(nil)) {
+			h.GetLog().Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Authentication failed: SHA256 password comparison failed - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("invalid credentials")
 			l.maybePutInTimeout(ctx, h, conn, true)
 			return ldap.LDAPResultInvalidCredentials, nil
@@ -222,6 +231,8 @@ func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bind
 func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.Search")
 	defer span.End()
+
+	h.GetLog().Debug().Str("bindDN", bindDN).Msg("Search")
 
 	if l.isInTimeout(ctx, h, conn) {
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultUnwillingToPerform}, fmt.Errorf("source is in a timeout")
@@ -321,6 +332,8 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 func (l LDAPOpsHelper) searchCheckBindDN(ctx context.Context, h LDAPOpsHandler, baseDN string, bindDN string, anonymous bool) (newBindDN string, boundUser *config.User, ldapresultcode ldap.LDAPResultCode) {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.searchCheckBindDN")
 	defer span.End()
+
+	h.GetLog().Debug().Str("bindDN", bindDN).Msg("searchCheckBindDN")
 
 	boundUser, ldapcode := l.findUser(ctx, h, bindDN, false /* checkGroup */)
 	if ldapcode != ldap.LDAPResultSuccess {
@@ -651,12 +664,14 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 		var foundUser bool // = false
 		foundUser, user, _ = h.FindUser(ctx, bindDN, true)
 		if !foundUser {
+			h.GetLog().Debug().Str("userprincipalname", bindDN).Msg("Authentication failed: User not found by UPN - returning Invalid credentials")
 			h.GetLog().Info().Str("userprincipalname", bindDN).Msg("User not found")
 			return nil, ldap.LDAPResultInvalidCredentials
 		}
 	} else {
 		// parse the bindDN - ensure that the bindDN ends with the BaseDN
 		if !strings.HasSuffix(bindDN, baseDN) {
+			h.GetLog().Debug().Str("binddn", bindDN).Str("basedn", h.GetBackend().BaseDN).Msg("Authentication failed: BindDN not part of our BaseDN - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Str("basedn", h.GetBackend().BaseDN).Msg("BindDN not part of our BaseDN")
 			// h.GetLog().Warning(fmt.Sprintf("Bind Error: BindDN %s not our BaseDN %s", bindDN, baseDN))
 			return nil, ldap.LDAPResultInvalidCredentials
@@ -673,6 +688,7 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 			userName = strings.TrimPrefix(parts[0], h.GetBackend().NameFormatAsArray[0]+"=")
 			groupName = strings.TrimPrefix(parts[1], h.GetBackend().GroupFormatAsArray[0]+"=")
 		} else {
+			h.GetLog().Debug().Str("binddn", bindDN).Int("numparts", len(parts)).Msg("Authentication failed: BindDN should have only one or two parts - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Int("numparts", len(parts)).Msg("BindDN should have only one or two parts")
 			for _, part := range parts {
 				h.GetLog().Info().Str("part", part).Msg("Parts")
@@ -685,6 +701,7 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 		foundUser, user, _ = h.FindUser(ctx, userName, false)
 
 		if !foundUser {
+			h.GetLog().Debug().Str("username", userName).Msg("Authentication failed: User not found by username - returning Invalid credentials")
 			h.GetLog().Info().Str("username", userName).Msg("User not found")
 			return nil, ldap.LDAPResultInvalidCredentials
 		}
@@ -698,6 +715,7 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 			if groupName != "" {
 				foundGroup, group, _ = h.FindGroup(ctx, groupName)
 				if !foundGroup {
+					h.GetLog().Debug().Str("groupname", groupName).Msg("Authentication failed: Group not found - returning Invalid credentials")
 					h.GetLog().Info().Str("groupname", groupName).Msg("Group not found")
 					return nil, ldap.LDAPResultInvalidCredentials
 				}
@@ -705,9 +723,12 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 			// validate group membership
 			if foundGroup {
 				if user.PrimaryGroup != group.GIDNumber {
+					h.GetLog().Debug().Str("username", userName).Int("primarygroup", user.PrimaryGroup).Int("groupid", group.GIDNumber).Msg("Authentication failed: Primary group mismatch - returning Invalid credentials")
 					h.GetLog().Info().Str("username", userName).Int("primarygroup", user.PrimaryGroup).Int("groupid", group.GIDNumber).Msg("primary group mismatch")
 					return nil, ldap.LDAPResultInvalidCredentials
 				}
+			} else {
+				h.GetLog().Debug().Str("username", userName).Msg("Authentication failed: Group not found - returning Invalid credentials")
 			}
 		}
 	}
@@ -802,6 +823,8 @@ func (l *LDAPOpsHelper) isInTimeout(ctx context.Context, handler LDAPOpsHandler,
 func (l *LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHandler, conn net.Conn, noteFailure bool) bool {
 	ctx, span := l.tracer.Start(ctx, "handler.LDAPOpsHelper.maybePutInTimeout")
 	defer span.End()
+
+	handler.GetLog().Debug().Str("src", conn.RemoteAddr().String()).Msg("maybePutInTimeout")
 
 	cfg := handler.GetCfg()
 	if !cfg.Behaviors.LimitFailedBinds {

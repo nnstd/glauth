@@ -72,6 +72,7 @@ func (c *RunCmd) Run(cliCtx *CLI) error {
 	if cfg.Debug {
 		log.Info().Msg("Debugging enabled")
 	}
+
 	if cfg.Syslog {
 		log.Info().Msg("Syslog enabled")
 	}

@@ -61,8 +61,9 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 				handler.Tracer(s.tracer),
 			)
 		default:
-			return nil, fmt.Errorf("unsupported helper %s - must be 'config'", s.c.Helper.Datastore)
+			return nil, fmt.Errorf("unsupported helper '%s' - must be 'config'", s.c.Helper.Datastore)
 		}
+
 		s.log.Info().Str("datastore", s.c.Helper.Datastore).Msg("Using helper")
 	}
 

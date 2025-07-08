@@ -45,6 +45,9 @@ func NewConfigHandler(opts ...Option) Handler {
 		monitor:     options.Monitor,
 		tracer:      options.Tracer,
 	}
+
+	handler.log.Debug().Msg("ConfigHandler created")
+
 	return handler
 }
 
@@ -69,6 +72,8 @@ func (h configHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result 
 	ctx, span := h.tracer.Start(context.Background(), "handler.configHandler.Bind")
 	defer span.End()
 
+	h.log.Debug().Str("bindDN", bindDN).Str("bindSimplePw", bindSimplePw).Msg("Bind")
+
 	start := time.Now()
 
 	defer func() {
@@ -85,6 +90,8 @@ func (h configHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result 
 func (h configHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
 	ctx, span := h.tracer.Start(context.Background(), "handler.configHandler.Search")
 	defer span.End()
+
+	h.log.Debug().Str("bindDN", bindDN).Msg("Search")
 
 	start := time.Now()
 
@@ -103,6 +110,8 @@ func (h configHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (
 	_, span := h.tracer.Start(context.Background(), "handler.configHandler.Add")
 	defer span.End()
 
+	h.log.Debug().Str("boundDN", boundDN).Msg("Add")
+
 	start := time.Now()
 
 	defer func() {
@@ -120,6 +129,8 @@ func (h configHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.C
 	_, span := h.tracer.Start(context.Background(), "handler.configHandler.Modify")
 	defer span.End()
 
+	h.log.Debug().Str("boundDN", boundDN).Msg("Modify")
+
 	start := time.Now()
 
 	defer func() {
@@ -136,6 +147,8 @@ func (h configHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.C
 func (h configHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	_, span := h.tracer.Start(context.Background(), "handler.configHandler.Delete")
 	defer span.End()
+
+	h.log.Debug().Str("boundDN", boundDN).Str("deleteDN", deleteDN).Msg("Delete")
 
 	start := time.Now()
 
@@ -192,21 +205,33 @@ func (h configHandler) FindGroup(ctx context.Context, groupName string) (f bool,
 	_, span := h.tracer.Start(ctx, "handler.configHandler.FindGroup")
 	defer span.End()
 
+	h.log.Debug().Str("groupName", groupName).Msg("FindGroup")
+
 	fillGroup := config.Group{}
 
 	found := false
+
 	for _, group := range h.cfg.Groups {
+		h.log.Debug().Str("groupName", groupName).Msg("found group in FindGroup")
+
 		if strings.EqualFold(group.Name, groupName) {
+			h.log.Debug().Str("groupName", groupName).Msg("group name match in FindGroup")
+
 			found = true
 			fillGroup = group
+		} else {
+			h.log.Debug().Str("groupName", groupName).Msg("group name not match in FindGroup")
 		}
 	}
+
 	return found, fillGroup, nil
 }
 
 func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) (entrylist []*ldap.Entry, err error) {
 	ctx, span := h.tracer.Start(ctx, "handler.configHandler.FindPosixAccounts")
 	defer span.End()
+
+	h.log.Debug().Str("hierarchy", hierarchy).Msg("FindPosixAccounts")
 
 	entries := []*ldap.Entry{}
 
@@ -306,6 +331,8 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 	ctx, span := h.tracer.Start(ctx, "handler.configHandler.FindPosixGroups")
 	defer span.End()
 
+	h.log.Debug().Str("hierarchy", hierarchy).Msg("FindPosixGroups")
+
 	asGroupOfUniqueNames := hierarchy == "ou=groups"
 
 	entries := []*ldap.Entry{}
@@ -337,6 +364,8 @@ func (h configHandler) Close(boundDn string, conn net.Conn) error {
 	_, span := h.tracer.Start(context.Background(), "handler.configHandler.Close")
 	defer span.End()
 
+	h.log.Debug().Str("boundDn", boundDn).Msg("Close")
+
 	stats.Frontend.Add("closes", 1)
 	return nil
 }
@@ -344,6 +373,8 @@ func (h configHandler) Close(boundDn string, conn net.Conn) error {
 func (h configHandler) getGroupMemberDNs(ctx context.Context, gid int) []string {
 	ctx, span := h.tracer.Start(ctx, "handler.configHandler.getGroupMemberDNs")
 	defer span.End()
+
+	h.log.Debug().Int("gid", gid).Msg("getGroupMemberDNs")
 
 	var insertOuUsers string
 	if h.cfg.Behaviors.LegacyVersion > 0 && h.cfg.Behaviors.LegacyVersion <= 20100 {
@@ -394,6 +425,8 @@ func (h configHandler) getGroupMemberIDs(ctx context.Context, gid int) []string 
 	ctx, span := h.tracer.Start(ctx, "handler.configHandler.getGroupMemberIDs")
 	defer span.End()
 
+	h.log.Debug().Int("gid", gid).Msg("getGroupMemberIDs")
+
 	members := make(map[string]bool)
 	for _, u := range h.cfg.Users {
 		if u.PrimaryGroup == gid {
@@ -438,6 +471,8 @@ func (h configHandler) getGroupDNs(ctx context.Context, gids []int) []string {
 	ctx, span := h.tracer.Start(ctx, "handler.configHandler.getGroupDNs")
 	defer span.End()
 
+	h.log.Debug().Ints("gids", gids).Msg("getGroupDNs")
+
 	groups := make(map[string]bool)
 	for _, gid := range gids {
 		for _, g := range h.cfg.Groups {
@@ -471,6 +506,8 @@ func (h configHandler) getGroupDNs(ctx context.Context, gids []int) []string {
 func (h configHandler) getGroupName(ctx context.Context, gid int) string {
 	_, span := h.tracer.Start(ctx, "handler.configHandler.getGroupName")
 	defer span.End()
+
+	h.log.Debug().Int("gid", gid).Msg("getGroupName")
 
 	for _, g := range h.cfg.Groups {
 		if g.GIDNumber == gid {
