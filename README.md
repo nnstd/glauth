@@ -121,7 +121,6 @@ GLAuth can use a local file, S3 or an existing LDAP infrastructure and also supp
 ### Contributing
 For more information, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-# Stargazers over time
+### License
 
-[![Stargazers over time](https://starchart.cc/nnstd/glauth.svg)](https://starchart.cc/nnstd/glauth)
-
+GLAuth is licensed under the [GNU Affero General Public License v3.0](https://github.com/nnstd/glauth/blob/master/LICENSE) and as commercial software. For commercial licensing, please contact us at sales@nnstd.dev.
