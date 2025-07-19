@@ -8,9 +8,10 @@ import (
 	"net"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+
+	"slices"
 
 	"github.com/rs/zerolog"
 	"github.com/uptrace/opentelemetry-go-extra/otelsql"
@@ -22,7 +23,6 @@ import (
 	"github.com/glauth/ldap"
 	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/nnstd/glauth/v2/pkg/handler"
-	"github.com/nnstd/glauth/v2/pkg/stats"
 )
 
 var configattributematcher = regexp.MustCompile(`(?i)\((?P<attribute>[a-zA-Z0-9]+)\s*=\s*(?P<value>.*)\)`)
@@ -70,11 +70,11 @@ func NewDatabaseHandler(sqlBackend SqlBackend, opts ...handler.Option) handler.H
 		otelsql.WithAttributes(otlpDriverAttribute(sqlBackend)),
 		otelsql.WithDBName(options.Backend.Database),
 	)
-
 	if err != nil {
 		options.Logger.Error().Err(err).Msg(fmt.Sprintf("unable to open SQL database named '%s'", options.Backend.Database))
 		os.Exit(1)
 	}
+
 	err = db.Ping()
 	if err != nil {
 		options.Logger.Error().Err(err).Msg(fmt.Sprintf("unable to communicate with SQL database error: %s", options.Backend.Database))
@@ -103,7 +103,7 @@ func NewDatabaseHandler(sqlBackend SqlBackend, opts ...handler.Option) handler.H
 
 	handler.preparedSymbol = sqlBackend.GetPrepareSymbol()
 
-	options.Logger.Debug().Msg("Database (" + sqlBackend.GetDriverName() + "::" + options.Backend.Database + ") Handler: Ready")
+	options.Logger.Debug().Msg("Database handler is ready")
 
 	return handler
 }
@@ -131,12 +131,15 @@ func otlpDriverAttribute(backend SqlBackend) attribute.KeyValue {
 func (h databaseHandler) GetBackend() config.Backend {
 	return h.backend
 }
+
 func (h databaseHandler) GetLog() *zerolog.Logger {
 	return h.log
 }
+
 func (h databaseHandler) GetCfg() *config.Config {
 	return h.cfg
 }
+
 func (h databaseHandler) GetYubikeyAuth() *yubigo.YubiAuth {
 	return h.yubikeyAuth
 }
@@ -379,6 +382,7 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	var sshKeys string
 	var custattrstr string
 	var passBcrypt, passSHA256, otpSecret, yubikey, givenName, sn, mail, loginShell, homedir sql.NullString
+
 	u := config.User{}
 
 	for rows.Next() {
@@ -391,27 +395,35 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String
 		}
+
 		if passSHA256.Valid {
 			u.PassSHA256 = passSHA256.String
 		}
+
 		if otpSecret.Valid {
 			u.OTPSecret = otpSecret.String
 		}
+
 		if yubikey.Valid {
 			u.Yubikey = yubikey.String
 		}
+
 		if givenName.Valid {
 			u.GivenName = givenName.String
 		}
+
 		if sn.Valid {
 			u.SN = sn.String
 		}
+
 		if mail.Valid {
 			u.Mail = mail.String
 		}
+
 		if loginShell.Valid {
 			u.LoginShell = loginShell.String
 		}
+
 		if homedir.Valid {
 			u.Homedir = homedir.String
 		}
@@ -449,15 +461,19 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 		if u.GivenName != "" {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "givenName", Values: []string{u.GivenName}})
 		}
+
 		if u.SN != "" {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "sn", Values: []string{u.SN}})
 		}
+
 		if u.Mail != "" {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "mail", Values: []string{u.Mail}})
 		}
+
 		if u.LoginShell != "" {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "loginShell", Values: []string{u.LoginShell}})
 		}
+
 		if u.Homedir != "" {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "homeDirectory", Values: []string{u.Homedir}})
 		}
@@ -485,7 +501,6 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	}
 
 	h.log.Debug().Int("users_found", len(entries)).Msg("Users found")
-	stats.Frontend.Add("users_found", int64(len(entries)))
 
 	return entries, nil
 }
@@ -521,7 +536,6 @@ func (h databaseHandler) FindPosixGroups(ctx context.Context, hierarchy string) 
 	}
 
 	h.log.Debug().Int("groups_found", len(entries)).Msg("Groups found")
-	stats.Frontend.Add("groups_found", int64(len(entries)))
 
 	return entries, nil
 }
@@ -540,18 +554,20 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
-		`
-			SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups
-			FROM users u`)
+		`SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups
+		FROM users u`)
 	if err != nil {
 		// Silent fail... for now
 		return []string{}
 	}
+
 	defer rows.Close()
 
 	var otherGroups string
 	var passBcrypt, passSHA256, otpSecret, yubikey sql.NullString
+
 	u := config.User{}
+
 	for rows.Next() {
 		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups)
 		if err != nil {
@@ -562,15 +578,19 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String
 		}
+
 		if passSHA256.Valid {
 			u.PassSHA256 = passSHA256.String
 		}
+
 		if otpSecret.Valid {
 			u.OTPSecret = otpSecret.String
 		}
+
 		if yubikey.Valid {
 			u.Yubikey = yubikey.String
 		}
+
 		if u.PrimaryGroup == gid {
 			dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
 			members[dn] = true
@@ -589,7 +609,8 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 	for member := range members {
 		retval = append(retval, member)
 	}
-	sort.Strings(retval)
+
+	slices.Sort(retval)
 
 	return retval
 }
@@ -609,11 +630,14 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 		// Silent fail... for now
 		return []string{}
 	}
+
 	defer rows.Close()
 
 	var otherGroups string
 	var passBcrypt, passSHA256, otpSecret, yubikey sql.NullString
+
 	u := config.User{}
+
 	for rows.Next() {
 		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups)
 		if err != nil {
@@ -624,15 +648,19 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 		if passBcrypt.Valid {
 			u.PassBcrypt = passBcrypt.String
 		}
+
 		if passSHA256.Valid {
 			u.PassSHA256 = passSHA256.String
 		}
+
 		if otpSecret.Valid {
 			u.OTPSecret = otpSecret.String
 		}
+
 		if yubikey.Valid {
 			u.Yubikey = yubikey.String
 		}
+
 		if u.PrimaryGroup == gid {
 			members[u.Name] = true
 		} else {
@@ -649,13 +677,14 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 	for member := range members {
 		retval = append(retval, member)
 	}
-	sort.Strings(retval)
+
+	slices.Sort(retval)
 
 	return retval
 }
 
 func (h databaseHandler) getGroupName(ctx context.Context, gid int) string {
-	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.getGroupName")
+	_, span := h.tracer.Start(ctx, "database.databaseHandler.getGroupName")
 	defer span.End()
 
 	for _, g := range h.MemGroups {
