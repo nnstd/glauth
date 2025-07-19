@@ -147,7 +147,7 @@ func (l *LDAPOpsHelper) Bind(ctx context.Context, h LDAPOpsHandler, bindDN, bind
 			}
 		}
 	}
-	
+
 	if user.PassAppSHA256 != nil {
 		hashFull := sha256.New()
 		hashFull.Write([]byte(untouchedBindSimplePw))
