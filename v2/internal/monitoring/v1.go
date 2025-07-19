@@ -42,7 +42,7 @@ func (m *Monitor) constLabels() map[string]string {
 }
 
 func (m *Monitor) registerHistograms() {
-	histograms := make([]*prometheus.HistogramVec, 0)
+	histograms := make([]*prometheus.HistogramVec, 0, 10) // Pre-allocate for estimated number of histograms
 
 	m.responseTime = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -70,7 +70,7 @@ func (m *Monitor) registerHistograms() {
 }
 
 func (m *Monitor) registerGauges() {
-	gauges := make([]*prometheus.GaugeVec, 0)
+	gauges := make([]*prometheus.GaugeVec, 0, 10) // Pre-allocate for estimated number of gauges
 
 	m.ldapMetric = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cespare/xxhash"
+	"github.com/glauth/ldap"
 )
 
 // bytesPool for reusing buffer allocations
@@ -247,4 +250,163 @@ func BenchmarkHashMemoryAllocation(b *testing.B) {
 			computeServerHashXXHashOptimized(servers)
 		}
 	})
+}
+
+// Benchmark server key construction methods
+func BenchmarkServerKeyConstruction(b *testing.B) {
+	server := ldapBackend{
+		Scheme:   "ldaps",
+		Hostname: "example-server.com",
+		Port:     636,
+		Status:   Up,
+		Ping:     time.Duration(10) * time.Millisecond,
+	}
+
+	b.Run("fmt.Sprintf", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+			_ = serverKey
+		}
+	})
+
+	b.Run("strings.Builder", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var sb strings.Builder
+			sb.WriteString(server.Hostname)
+			sb.WriteString(":")
+			sb.WriteString(strconv.Itoa(server.Port))
+			serverKey := sb.String()
+			_ = serverKey
+		}
+	})
+
+	b.Run("strings.Builder_Preallocated", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var sb strings.Builder
+			// Pre-allocate capacity for hostname + ":" + port (max 5 digits)
+			sb.Grow(len(server.Hostname) + 1 + 5)
+			sb.WriteString(server.Hostname)
+			sb.WriteString(":")
+			sb.WriteString(strconv.Itoa(server.Port))
+			serverKey := sb.String()
+			_ = serverKey
+		}
+	})
+
+	b.Run("strings.Join", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			serverKey := strings.Join([]string{server.Hostname, strconv.Itoa(server.Port)}, ":")
+			_ = serverKey
+		}
+	})
+}
+
+// Benchmark with different hostname lengths
+func BenchmarkServerKeyConstruction_VariableLength(b *testing.B) {
+	testCases := []struct {
+		name     string
+		hostname string
+		port     int
+	}{
+		{"short", "srv", 389},
+		{"medium", "example-server.com", 636},
+		{"long", "very-long-server-name-in-production-environment.example.com", 1636},
+	}
+
+	for _, tc := range testCases {
+		server := ldapBackend{
+			Scheme:   "ldaps",
+			Hostname: tc.hostname,
+			Port:     tc.port,
+			Status:   Up,
+			Ping:     time.Duration(10) * time.Millisecond,
+		}
+
+		b.Run(fmt.Sprintf("fmt.Sprintf_%s", tc.name), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+				_ = serverKey
+			}
+		})
+
+		b.Run(fmt.Sprintf("strings.Builder_%s", tc.name), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var sb strings.Builder
+				sb.Grow(len(server.Hostname) + 1 + 5)
+				sb.WriteString(server.Hostname)
+				sb.WriteString(":")
+				sb.WriteString(strconv.Itoa(server.Port))
+				serverKey := sb.String()
+				_ = serverKey
+			}
+		})
+	}
+}
+
+// Benchmark slice allocation methods
+func BenchmarkSliceAllocation(b *testing.B) {
+	b.Run("Unoptimized_EmptySlice", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			entries := []*ldap.Entry{}
+			attrs := []*ldap.EntryAttribute{}
+			_ = entries
+			_ = attrs
+		}
+	})
+
+	b.Run("Optimized_Preallocated", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			entries := make([]*ldap.Entry, 0, 100)
+			attrs := make([]*ldap.EntryAttribute, 0, 20)
+			_ = entries
+			_ = attrs
+		}
+	})
+
+	b.Run("Optimized_ExactSize", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			entries := make([]*ldap.Entry, 0, 50)
+			attrs := make([]*ldap.EntryAttribute, 0, 10)
+			_ = entries
+			_ = attrs
+		}
+	})
+}
+
+// Benchmark slice operations with different sizes
+func BenchmarkSliceOperations(b *testing.B) {
+	sizes := []int{10, 100, 1000}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("Unoptimized_Size%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				entries := []*ldap.Entry{}
+				for j := 0; j < size; j++ {
+					entries = append(entries, &ldap.Entry{})
+				}
+				_ = entries
+			}
+		})
+
+		b.Run(fmt.Sprintf("Optimized_Size%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				entries := make([]*ldap.Entry, 0, size)
+				for j := 0; j < size; j++ {
+					entries = append(entries, &ldap.Entry{})
+				}
+				_ = entries
+			}
+		})
+	}
 }

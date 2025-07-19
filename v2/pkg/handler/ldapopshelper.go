@@ -354,7 +354,7 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 	}
 
 	// So, this should be an ERROR condition! Right..?
-	entries := []*ldap.Entry{}
+	entries := make([]*ldap.Entry, 0) // Pre-allocate with 0 capacity for error case
 	stats.Frontend.Add("search_failures", 1)
 	return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldap.LDAPResultSuccess}, nil
 }
@@ -403,8 +403,8 @@ func (l LDAPOpsHelper) searchMaybeRootDSEQuery(ctx context.Context, h LDAPOpsHan
 	}
 
 	h.GetLog().Info().Str("special case", "root DSE").Msg("Search request")
-	entries := []*ldap.Entry{}
-	attrs := []*ldap.EntryAttribute{}
+	entries := make([]*ldap.Entry, 0, 1)         // Pre-allocate for single root DSE entry
+	attrs := make([]*ldap.EntryAttribute, 0, 10) // Pre-allocate for 10 root DSE attributes
 	// unfortunately, objectClass is not to be included so we will respect that
 	// attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"*"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "supportedSASLMechanisms", Values: []string{}})
@@ -434,8 +434,8 @@ func (l LDAPOpsHelper) searchMaybeSchemaQuery(ctx context.Context, h LDAPOpsHand
 	}
 
 	h.GetLog().Info().Str("special case", "schema discovery").Msg("Search request")
-	entries := []*ldap.Entry{}
-	attrs := []*ldap.EntryAttribute{}
+	entries := make([]*ldap.Entry, 0, 1)         // Pre-allocate for single schema entry
+	attrs := make([]*ldap.EntryAttribute, 0, 20) // Pre-allocate for schema attributes + file attributes
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "cn", Values: []string{"schema"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "hasSubordinates", Values: []string{"false"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "modifiersName", Values: []string{"cn=Directory Manager"}})
@@ -446,12 +446,15 @@ func (l LDAPOpsHelper) searchMaybeSchemaQuery(ctx context.Context, h LDAPOpsHand
 	for _, filename := range filenames {
 		attributename := new(string)
 		*attributename = filename.Name()
+
 		file, err := os.Open(filepath.Join("schema", *attributename))
 		if err != nil {
 			return nil, ldap.LDAPResultOperationsError, attributename
 		}
+
 		defer file.Close()
-		values := []string{}
+		// Pre-allocate values slice with estimated capacity
+		values := make([]string, 0, 100) // Estimate 100 lines per schema file
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -479,7 +482,8 @@ func (l LDAPOpsHelper) searchMaybeTopLevelNodes(ctx context.Context, h LDAPOpsHa
 		return nil, ldap.LDAPResultOther // OK
 	}
 	h.GetLog().Info().Str("special case", "top-level browse").Msg("Search request")
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity for top-level nodes
+	entries := make([]*ldap.Entry, 0, 10) // Estimate 10 top-level entries
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
 		entries = append(entries, l.topLevelRootNode(searchBaseDN))
 	}
@@ -515,7 +519,8 @@ func (l LDAPOpsHelper) searchMaybeTopLevelGroupsNode(ctx context.Context, h LDAP
 		return nil, ldap.LDAPResultOther // OK
 	}
 	h.GetLog().Info().Str("special case", "top-level groups node").Msg("Search request")
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity for groups
+	entries := make([]*ldap.Entry, 0, 100) // Estimate 100 groups
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
 		entries = append(entries, l.topLevelGroupsNode(searchBaseDN, "groups"))
 	}
@@ -542,7 +547,8 @@ func (l LDAPOpsHelper) searchMaybeTopLevelUsersNode(ctx context.Context, h LDAPO
 		return nil, ldap.LDAPResultOther // OK
 	}
 	h.GetLog().Info().Str("special case", "top-level users node").Msg("Search request")
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity for users
+	entries := make([]*ldap.Entry, 0, 1000) // Estimate 1000 users
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
 		entries = append(entries, l.topLevelUsersNode(searchBaseDN))
 	}
@@ -582,7 +588,10 @@ func (l LDAPOpsHelper) searchMaybePosixGroups(ctx context.Context, h LDAPOpsHand
 		hierarchy = bits[1]
 	}
 	h.GetLog().Info().Str("special case", "posix groups").Msg("Search request")
-	entries := []*ldap.Entry{}
+
+	// Pre-allocate entries slice with estimated capacity for groups
+	entries := make([]*ldap.Entry, 0, 100) // Estimate 100 groups
+
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, hierarchy)
 		if err != nil {
@@ -663,7 +672,8 @@ func (l LDAPOpsHelper) topLevelRootNode(searchBaseDN string) *ldap.Entry {
 }
 
 func (l LDAPOpsHelper) topLevelGroupsNode(searchBaseDN string, hierarchy string) *ldap.Entry {
-	attrs := []*ldap.EntryAttribute{}
+	// Pre-allocate attributes slice with estimated capacity
+	attrs := make([]*ldap.EntryAttribute, 0, 2) // 2 attributes: ou and objectClass
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "ou", Values: []string{"groups"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"organizationalUnit", "top"}})
 	hierarchyStringPrefix := fmt.Sprintf("ou=%s,", hierarchy)
@@ -675,7 +685,8 @@ func (l LDAPOpsHelper) topLevelGroupsNode(searchBaseDN string, hierarchy string)
 }
 
 func (l LDAPOpsHelper) topLevelUsersNode(searchBaseDN string) *ldap.Entry {
-	attrs := []*ldap.EntryAttribute{}
+	// Pre-allocate attributes slice with estimated capacity
+	attrs := make([]*ldap.EntryAttribute, 0, 2) // 2 attributes: ou and objectClass
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "ou", Values: []string{"users"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"organizationalUnit", "top"}})
 	dn := searchBaseDN
@@ -690,7 +701,8 @@ func (l LDAPOpsHelper) topLevelUsersNode(searchBaseDN string) *ldap.Entry {
 // (and only in this scenario!) will defeat the LDAP library's filtering capabilities.
 // Some day, hopefully, I'll fix this directly in the library.
 func (l LDAPOpsHelper) preFilterEntries(ctx context.Context, searchBaseDN string, entries []*ldap.Entry) (resultentries []*ldap.Entry) {
-	filteredEntries := []*ldap.Entry{}
+	// Pre-allocate filtered entries slice with estimated capacity
+	filteredEntries := make([]*ldap.Entry, 0, len(entries)) // Assume most entries will match
 	for _, entry := range entries {
 		if strings.HasSuffix(entry.DN, searchBaseDN) {
 			filteredEntries = append(filteredEntries, entry)

@@ -142,7 +142,8 @@ func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, co
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("search error: search BaseDN %s is not in our BaseDN %s", searchBaseDN, h.backend.BaseDN)
 	}
 	// return all users in the config file - the LDAP library will filter results for us
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, 100) // Estimate 100 entries
 	filterEntity, err := ldap.GetFilterObjectClass(searchReq.Filter)
 	if err != nil {
 		stats.Frontend.Add("search_failures", 1)
@@ -169,13 +170,17 @@ func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, co
 			return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("search error: error getting groups")
 		}
 		for _, g := range groups {
-			attrs := []*ldap.EntryAttribute{}
+			// Pre-allocate attributes slice with estimated capacity
+			attrs := make([]*ldap.EntryAttribute, 0, 10) // Estimate 10 attributes per group
+
 			for _, groupAttr := range h.backend.GroupFormatAsArray {
 				attrs = append(attrs, &ldap.EntryAttribute{Name: groupAttr, Values: []string{*g.ID}})
 			}
+
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{fmt.Sprintf("%s from ownCloud", *g.ID)}})
 			//			attrs = append(attrs, &ldap.EntryAttribute{"gidNumber", []string{fmt.Sprintf("%d", g.GIDNumber)}})
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"posixGroup"}})
+
 			if g.Members != nil {
 				members := make([]string, len(g.Members))
 				for i, v := range g.Members {
@@ -184,6 +189,7 @@ func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, co
 
 				attrs = append(attrs, &ldap.EntryAttribute{Name: "memberUid", Values: members})
 			}
+
 			dn := fmt.Sprintf("%s=%s,ou=groups,%s", h.backend.GroupFormatAsArray[0], *g.ID, h.backend.BaseDN)
 			entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
 		}
@@ -195,20 +201,27 @@ func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, co
 				userName = strings.TrimPrefix(parts[0], "cn=")
 			}
 		}
+
 		users, err := session.getUsers(userName)
+
 		if err != nil {
 			h.log.Debug().Str("username", userName).Err(err).Msg("Could not get user")
 			stats.Frontend.Add("search_failures", 1)
 			return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("search error: error getting users")
 		}
+
 		for _, u := range users {
-			attrs := []*ldap.EntryAttribute{}
+			// Pre-allocate attributes slice with estimated capacity
+			attrs := make([]*ldap.EntryAttribute, 0, 10) // Estimate 10 attributes per user
+
 			for _, nameAttr := range h.backend.NameFormatAsArray {
 				attrs = append(attrs, &ldap.EntryAttribute{Name: nameAttr, Values: []string{*u.ID}})
 			}
+
 			if u.DisplayName != nil {
 				attrs = append(attrs, &ldap.EntryAttribute{Name: "givenName", Values: []string{*u.DisplayName}})
 			}
+
 			if u.Mail != nil {
 				attrs = append(attrs, &ldap.EntryAttribute{Name: "mail", Values: []string{*u.Mail}})
 			}
@@ -216,10 +229,12 @@ func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, co
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"posixAccount"}})
 
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{fmt.Sprintf("%s from ownCloud", *u.ID)}})
+
 			dn := fmt.Sprintf("%s=%s,%s=%s,%s", h.backend.NameFormatAsArray[0], *u.ID, h.backend.GroupFormatAsArray[0], "users", h.backend.BaseDN)
 			entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
 		}
 	}
+
 	stats.Frontend.Add("search_successes", 1)
 	h.log.Debug().Str("filter", searchReq.Filter).Msg("AP: Search OK")
 	return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldap.LDAPResultSuccess}, nil

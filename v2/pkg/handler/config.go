@@ -355,6 +355,7 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 				case []interface{}:
 					// Pre-allocate values slice with estimated capacity
 					values := make([]string, 0, len(typedattr))
+
 					for _, v := range typedattr {
 						switch typedvalue := v.(type) {
 						case string:
@@ -363,6 +364,7 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 							values = append(values, MaybeDecode(fmt.Sprintf("%v", typedvalue)))
 						}
 					}
+
 					attrs = append(attrs, &ldap.EntryAttribute{Name: key, Values: values})
 				default:
 					h.log.Warn().Str("key", key).Interface("value", attr).Msg("Unable to map custom attribute")
