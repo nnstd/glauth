@@ -18,6 +18,7 @@ Use it to centralize account management across your Linux servers, your OSX mach
 - [x] Moved from [docopt](https://github.com/docopt/docopt-go) to [kong](https://github.com/alecthomas/kong) in CLI.
 - [x] Bumped Go and dependencies versions.
 - [x] Added binary distribution for various architectures of Linux, MacOS and Windows.
+- [x] Added Grafana [dashboard](https://github.com/nnstd/glauth/blob/master/examples/dashboard.json).
 
 ### Quickstart
 This quickstart is a great way to try out GLAuth in a non-production environment.  *Be warned that you should take the extra steps to setup SSL (TLS) for production use!*
@@ -35,6 +36,14 @@ You can use [Helm chart](https://github.com/nnstd/helm-glauth). It has:
 - [x] Support of [PostgresOperator](https://github.com/movetokube/postgres-operator) for database creation and secret management.
 
 and more.
+
+### Monitoring
+
+GLAuth has a Grafana dashboard that can be used to monitor the server.
+
+1. Download the [dashboard](https://github.com/nnstd/glauth/blob/master/examples/dashboard.json).
+2. Import the dashboard into Grafana.
+3. Configure the data source to point to the GLAuth server.
 
 ### Make Commands
 
