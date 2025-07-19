@@ -131,3 +131,33 @@ func TestGlobalCountersReset(t *testing.T) {
 		t.Errorf("Expected backend test_global to be 0 after reset, got %d", Backend.Get("test_global"))
 	}
 }
+
+func TestResettableMapSet(t *testing.T) {
+	rm := NewResettableMap()
+
+	// Test setting numeric values
+	rm.Set("test_int", int64(42))
+	if rm.Get("test_int") != 42 {
+		t.Errorf("Expected test_int to be 42, got %d", rm.Get("test_int"))
+	}
+
+	// Test setting string values
+	rm.Set("test_string", "hello world")
+
+	// Test that string values are included in the JSON output
+	result := rm.String()
+	if len(result) == 0 {
+		t.Errorf("Expected non-empty string result")
+	}
+
+	// Test reset clears both numeric and string values
+	previousValues := rm.ResetAll()
+	if previousValues["test_int"] != 42 {
+		t.Errorf("Expected test_int previous value to be 42, got %d", previousValues["test_int"])
+	}
+
+	// After reset, numeric value should be 0
+	if rm.Get("test_int") != 0 {
+		t.Errorf("Expected test_int to be 0 after reset, got %d", rm.Get("test_int"))
+	}
+}

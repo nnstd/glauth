@@ -39,14 +39,16 @@ func (c *Counter) String() string {
 
 // ResettableMap is a thread-safe map of counters that can be reset
 type ResettableMap struct {
-	counters map[string]*Counter
-	mu       sync.RWMutex
+	counters     map[string]*Counter
+	stringValues map[string]string
+	mu           sync.RWMutex
 }
 
 // NewResettableMap creates a new ResettableMap
 func NewResettableMap() *ResettableMap {
 	return &ResettableMap{
-		counters: make(map[string]*Counter),
+		counters:     make(map[string]*Counter),
+		stringValues: make(map[string]string),
 	}
 }
 
@@ -61,6 +63,33 @@ func (rm *ResettableMap) Add(key string, delta int64) {
 		counter = &Counter{}
 		counter.Add(delta)
 		rm.counters[key] = counter
+	}
+}
+
+// Set sets a counter to a specific value, creating it if it doesn't exist
+func (rm *ResettableMap) Set(key string, value interface{}) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	// For string values, we'll store them as a special counter type
+	// This maintains compatibility with the existing expvar.Set usage
+	if strValue, ok := value.(string); ok {
+		// Store string values separately
+		rm.stringValues[key] = strValue
+		return
+	}
+
+	// For numeric values, use the counter
+	if intValue, ok := value.(int64); ok {
+		if counter, exists := rm.counters[key]; exists {
+			// Reset and set to new value
+			counter.Reset()
+			counter.Add(intValue)
+		} else {
+			counter = &Counter{}
+			counter.Add(intValue)
+			rm.counters[key] = counter
+		}
 	}
 }
 
@@ -84,6 +113,8 @@ func (rm *ResettableMap) ResetAll() map[string]int64 {
 	for key, counter := range rm.counters {
 		previousValues[key] = counter.Reset()
 	}
+	// Clear string values as well
+	rm.stringValues = make(map[string]string)
 	return previousValues
 }
 
@@ -105,6 +136,8 @@ func (rm *ResettableMap) String() string {
 
 	result := "{"
 	first := true
+
+	// Add counter values
 	for key, counter := range rm.counters {
 		if !first {
 			result += ","
@@ -112,6 +145,16 @@ func (rm *ResettableMap) String() string {
 		result += `"` + key + `":` + counter.String()
 		first = false
 	}
+
+	// Add string values
+	for key, strValue := range rm.stringValues {
+		if !first {
+			result += ","
+		}
+		result += `"` + key + `":"` + strValue + `"`
+		first = false
+	}
+
 	result += "}"
 	return result
 }
