@@ -322,6 +322,7 @@ func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn n
 		e := err.(*ldap.Error)
 		h.log.Debug().Err(err).Msg("search Err")
 		stats.Frontend.Add("search_errors", 1)
+		stats.Frontend.Add("search_failures", 1)
 		ssr.ResultCode = ldap.LDAPResultCode(e.ResultCode)
 		return ssr, err
 	}

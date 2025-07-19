@@ -243,6 +243,7 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 	h.GetLog().Debug().Str("bindDN", bindDN).Msg("Search")
 
 	if l.isInTimeout(ctx, h, conn) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultUnwillingToPerform}, fmt.Errorf("source is in a timeout")
 	}
 
@@ -257,6 +258,7 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	if !anonymous {
 		if bindDN, boundUser, ldapcode = l.searchCheckBindDN(ctx, h, baseDN, bindDN, anonymous); ldapcode != ldap.LDAPResultSuccess {
+			stats.Frontend.Add("search_failures", 1)
 			return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("Search Error: Potential bypass of BindDN %s", bindDN)
 		}
 	}
@@ -266,8 +268,10 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	switch entries, ldapcode := l.searchMaybeRootDSEQuery(ctx, h, baseDN, searchBaseDN, searchReq, anonymous); ldapcode {
 	case ldap.LDAPResultUnwillingToPerform:
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("search Error: No BaseDN provided")
 	case ldap.LDAPResultInsufficientAccessRights:
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("root DSE Search Error: Anonymous BindDN not allowed %s", bindDN)
 	case ldap.LDAPResultSuccess:
 		return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldapcode}, nil
@@ -275,11 +279,13 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	// Past this point, there is no reason to allow anonymous searches
 	if anonymous {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: Anonymous BindDN not allowed %s", bindDN)
 	}
 
 	switch entries, ldapcode, attributename := l.searchMaybeSchemaQuery(ctx, h, baseDN, searchBaseDN, searchReq, anonymous); ldapcode {
 	case ldap.LDAPResultOperationsError:
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldapcode}, fmt.Errorf("schema Error: attribute %s cannot be read", *attributename)
 	case ldap.LDAPResultSuccess:
 		return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldapcode}, nil
@@ -289,13 +295,16 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	// But first, let's only allow legal searches
 	if !strings.HasSuffix(bindDN, fmt.Sprintf(",%s", baseDN)) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: BindDN %s not in our BaseDN %s", bindDN, h.GetBackend().BaseDN)
 	}
 	if !strings.HasSuffix(searchBaseDN, h.GetBackend().BaseDN) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: search BaseDN %s is not in our BaseDN %s", searchBaseDN, h.GetBackend().BaseDN)
 	}
 	// Unless globally ignored, we will check that a user has capabilities allowing them to perform a search in the requested BaseDN
 	if !h.GetCfg().Behaviors.IgnoreCapabilities && !l.checkCapability(ctx, h, *boundUser, "search", []string{"*", searchBaseDN}) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("Search Error: no capability allowing BindDN %s to perform search in %s", bindDN, searchBaseDN)
 	}
 
@@ -316,6 +325,7 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	filterEntity, err := ldap.GetFilterObjectClass(searchReq.Filter)
 	if err != nil {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("search Error: error parsing filter: %s", searchReq.Filter)
 	}
 
@@ -333,6 +343,7 @@ func (l *LDAPOpsHelper) Search(ctx context.Context, h LDAPOpsHandler, bindDN str
 
 	// So, this should be an ERROR condition! Right..?
 	entries := []*ldap.Entry{}
+	stats.Frontend.Add("search_failures", 1)
 	return ldap.ServerSearchResult{Entries: entries, Referrals: []string{}, Controls: []ldap.Control{}, ResultCode: ldap.LDAPResultSuccess}, nil
 }
 
@@ -461,12 +472,14 @@ func (l LDAPOpsHelper) searchMaybeTopLevelNodes(ctx context.Context, h LDAPOpsHa
 	if searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=users")
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, groupentries...)
 
 		userentries, err := h.FindPosixAccounts(ctx, "ou=users")
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, userentries...)
@@ -493,6 +506,7 @@ func (l LDAPOpsHelper) searchMaybeTopLevelGroupsNode(ctx context.Context, h LDAP
 	if searchReq.Scope == ldap.ScopeSingleLevel || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=groups")
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, groupentries...)
@@ -519,6 +533,7 @@ func (l LDAPOpsHelper) searchMaybeTopLevelUsersNode(ctx context.Context, h LDAPO
 	if searchReq.Scope == ldap.ScopeSingleLevel || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=users")
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, groupentries...)
@@ -526,6 +541,7 @@ func (l LDAPOpsHelper) searchMaybeTopLevelUsersNode(ctx context.Context, h LDAPO
 	if searchReq.Scope == ldap.ScopeWholeSubtree {
 		userentries, err := h.FindPosixAccounts(ctx, "ou=users")
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, userentries...)
@@ -554,6 +570,7 @@ func (l LDAPOpsHelper) searchMaybePosixGroups(ctx context.Context, h LDAPOpsHand
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, hierarchy)
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return nil, ldap.LDAPResultOperationsError
 		}
 		entries = append(entries, l.preFilterEntries(ctx, searchBaseDN, groupentries)...)
@@ -562,6 +579,7 @@ func (l LDAPOpsHelper) searchMaybePosixGroups(ctx context.Context, h LDAPOpsHand
 		if hierarchy == "ou=users" {
 			userentries, err := h.FindPosixAccounts(ctx, "ou=users")
 			if err != nil {
+				stats.Frontend.Add("search_failures", 1)
 				return nil, ldap.LDAPResultOperationsError
 			}
 			entries = append(entries, l.preFilterEntries(ctx, searchBaseDN, userentries)...)
@@ -594,6 +612,7 @@ func (l LDAPOpsHelper) searchMaybePosixAccounts(ctx context.Context, h LDAPOpsHa
 
 	unscopedEntries, err := h.FindPosixAccounts(ctx, hierarchyString)
 	if err != nil {
+		stats.Frontend.Add("search_failures", 1)
 		return nil, ldap.LDAPResultOperationsError
 	}
 

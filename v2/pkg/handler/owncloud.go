@@ -138,18 +138,22 @@ func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 
 	// validate the user is authenticated and has appropriate access
 	if len(bindDN) < 1 {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("search error: Anonymous BindDN not allowed %s", bindDN)
 	}
 	if !strings.HasSuffix(bindDN, baseDN) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("search error: BindDN %s not in our BaseDN %s", bindDN, h.backend.BaseDN)
 	}
 	if !strings.HasSuffix(searchBaseDN, h.backend.BaseDN) {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultInsufficientAccessRights}, fmt.Errorf("search error: search BaseDN %s is not in our BaseDN %s", searchBaseDN, h.backend.BaseDN)
 	}
 	// return all users in the config file - the LDAP library will filter results for us
 	entries := []*ldap.Entry{}
 	filterEntity, err := ldap.GetFilterObjectClass(searchReq.Filter)
 	if err != nil {
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("search error: error parsing filter: %s", searchReq.Filter)
 	}
 	h.lock.Lock()
@@ -159,10 +163,12 @@ func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 
 	switch filterEntity {
 	default:
+		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("search error: unhandled filter type: %s [%s]", filterEntity, searchReq.Filter)
 	case "posixgroup":
 		groups, err := session.getGroups()
 		if err != nil {
+			stats.Frontend.Add("search_failures", 1)
 			return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("search error: error getting groups")
 		}
 		for _, g := range groups {
@@ -195,6 +201,7 @@ func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 		users, err := session.getUsers(userName)
 		if err != nil {
 			h.log.Debug().Str("username", userName).Err(err).Msg("Could not get user")
+			stats.Frontend.Add("search_failures", 1)
 			return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("search error: error getting users")
 		}
 		for _, u := range users {
