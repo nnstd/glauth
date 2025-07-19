@@ -267,7 +267,7 @@ func stopSvc(svc *exec.Cmd) {
 
 func doRunGetFirst(delay time.Duration, name string, arg ...string) string {
 	out := strings.SplitN(doRun(delay, name, arg...), "\n", 2)
-	if out == nil || len(out) < 1 {
+	if len(out) < 1 {
 		return "*fail*"
 	}
 	return out[0]
@@ -275,7 +275,7 @@ func doRunGetFirst(delay time.Duration, name string, arg ...string) string {
 
 func doRunGetSecond(delay time.Duration, name string, arg ...string) string {
 	out := strings.SplitN(doRun(delay, name, arg...), "\n", 3)
-	if out == nil || len(out) < 2 {
+	if len(out) < 2 {
 		return "*fail*"
 	}
 	return out[1]

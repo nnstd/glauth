@@ -17,11 +17,8 @@ type LDAPMonitorWatcher struct {
 }
 
 func (m *LDAPMonitorWatcher) sync() {
-	for {
-		select {
-		case <-m.syncTicker.C:
-			m.storeMetrics()
-		}
+	for range m.syncTicker.C {
+		m.storeMetrics()
 	}
 }
 
@@ -32,12 +29,15 @@ func (m *LDAPMonitorWatcher) storeMetrics() {
 	if err := m.monitor.SetLDAPMetric(map[string]string{"type": "conns"}, float64(ldapStats.Conns)); err != nil {
 		m.logger.Error().Err(err).Msg("failed to set metric")
 	}
+
 	if err := m.monitor.SetLDAPMetric(map[string]string{"type": "binds"}, float64(ldapStats.Binds)); err != nil {
 		m.logger.Error().Err(err).Msg("failed to set metric")
 	}
+
 	if err := m.monitor.SetLDAPMetric(map[string]string{"type": "unbinds"}, float64(ldapStats.Unbinds)); err != nil {
 		m.logger.Error().Err(err).Msg("failed to set metric")
 	}
+
 	if err := m.monitor.SetLDAPMetric(map[string]string{"type": "searches"}, float64(ldapStats.Searches)); err != nil {
 		m.logger.Error().Err(err).Msg("failed to set metric")
 	}
@@ -121,8 +121,6 @@ func (m *LDAPMonitorWatcher) storeMetrics() {
 			m.logger.Error().Err(err).Str("metric", "backend_"+key).Msg("failed to set backend metric")
 		}
 	}
-
-	m.logger.Debug().Interface("frontend_values", frontendValues).Interface("backend_values", backendValues).Msg("Metrics collected")
 }
 
 func NewLDAPMonitorWatcher(ldap LDAPServerInterface, monitor MonitorInterface, logger *zerolog.Logger) *LDAPMonitorWatcher {
