@@ -42,8 +42,17 @@ func (m *LDAPMonitorWatcher) storeMetrics() {
 		m.logger.Error().Err(err).Msg("failed to set metric")
 	}
 
+	keys := []string{
+		"bind_reqs", "bind_successes", "bind_failures", "bind_errors",
+		"search_reqs", "search_successes", "search_failures", "search_errors",
+		"closes",
+	}
+
 	// Collect custom authentication and search metrics
-	frontendValues := stats.ResetFrontendCounters()
+	frontendValues := make(map[string]int64)
+	for _, key := range keys {
+		frontendValues[key] = stats.Frontend.Get(key)
+	}
 
 	// Set authentication metrics
 	if bindReqs, exists := frontendValues["bind_reqs"]; exists {
@@ -103,14 +112,17 @@ func (m *LDAPMonitorWatcher) storeMetrics() {
 	}
 
 	// Collect backend metrics
-	backendValues := stats.ResetBackendCounters()
+	backendValues := make(map[string]int64)
+	backendValues["closes"] = stats.Backend.Get("closes")
+	// Add other backend metrics as needed
+
 	for key, value := range backendValues {
 		if err := m.monitor.SetLDAPMetric(map[string]string{"type": "backend_" + key}, float64(value)); err != nil {
 			m.logger.Error().Err(err).Msgf("failed to set backend_%s metric", key)
 		}
 	}
 
-	m.logger.Debug().Interface("frontend_values", frontendValues).Interface("backend_values", backendValues).Msg("Metrics collected and counters reset")
+	m.logger.Debug().Interface("frontend_values", frontendValues).Interface("backend_values", backendValues).Msg("Metrics collected")
 }
 
 func NewLDAPMonitorWatcher(ldap LDAPServerInterface, monitor MonitorInterface, logger *zerolog.Logger) *LDAPMonitorWatcher {
