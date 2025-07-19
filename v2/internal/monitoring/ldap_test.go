@@ -26,6 +26,18 @@ func TestNewLDAPMonitorWatcherRunsOnASchedule(t *testing.T) {
 	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "unbinds"}, float64(0)).MinTimes(1)
 	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "searches"}, float64(0)).MinTimes(1)
 
+	// Expect custom metrics (these will be 0 initially since counters start at 0)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "bind_requests"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "bind_successes"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "bind_failures"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "bind_errors"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "search_requests"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "search_successes"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "search_failures"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "search_errors"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "closes"}, float64(0)).MinTimes(1)
+	mockMonitor.EXPECT().SetLDAPMetric(map[string]string{"type": "backend_closes"}, float64(0)).MinTimes(1)
+
 	logger := zerolog.Nop()
 	m := NewLDAPMonitorWatcher(mockLDAPServer, mockMonitor, &logger)
 
