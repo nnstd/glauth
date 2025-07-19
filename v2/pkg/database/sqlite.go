@@ -49,13 +49,24 @@ CREATE TABLE IF NOT EXISTS users (
 	statement.Exec()
 	statement, _ = db.Prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_name on users(name)")
 	statement.Exec()
+	// Add case-insensitive indexes for better performance
+	statement, _ = db.Prepare("CREATE INDEX IF NOT EXISTS idx_user_name_lower on users(lower(name))")
+	statement.Exec()
+	statement, _ = db.Prepare("CREATE INDEX IF NOT EXISTS idx_user_mail_lower on users(lower(mail))")
+	statement.Exec()
 	statement, _ = db.Prepare("CREATE TABLE IF NOT EXISTS ldapgroups (id INTEGER PRIMARY KEY, name TEXT NOT NULL, gidnumber INTEGER NOT NULL)")
 	statement.Exec()
 	statement, _ = db.Prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_group_name on ldapgroups(name)")
 	statement.Exec()
+	// Add case-insensitive index for groups
+	statement, _ = db.Prepare("CREATE INDEX IF NOT EXISTS idx_group_name_lower on ldapgroups(lower(name))")
+	statement.Exec()
 	statement, _ = db.Prepare("CREATE TABLE IF NOT EXISTS includegroups (id INTEGER PRIMARY KEY, parentgroupid INTEGER NOT NULL, includegroupid INTEGER NOT NULL)")
 	statement.Exec()
 	statement, _ = db.Prepare("CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY, userid INTEGER NOT NULL, action TEXT NOT NULL, object TEXT NOT NULL)")
+	statement.Exec()
+	// Add index for capabilities table to optimize JOIN queries
+	statement, _ = db.Prepare("CREATE INDEX IF NOT EXISTS idx_capabilities_userid on capabilities(userid)")
 	statement.Exec()
 }
 

@@ -194,21 +194,28 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 	user := config.User{}
 	found := false
 
+	// Pre-compute lowercase search term once to avoid repeated string operations
+	searchTerm := strings.ToLower(userName)
+
 	var query string
 	if searchByUPN {
 		if h.cfg.Behaviors.LegacyVersion < 20231 {
 			// For legacy version, if UPN flag is set, search explicitly within the mail field
 			query = fmt.Sprintf(`
-				SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr
+				SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr,
+				       c.action,c.object
 				FROM users u 
+				LEFT JOIN capabilities c ON c.userid = u.id 
 				WHERE LOWER(u.mail)=%s`,
 				h.preparedSymbol,
 			)
 		} else {
 			// For newer versions, UPN flag means "search name first, then email"
 			query = fmt.Sprintf(`
-				SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr
+				SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr,
+				       c.action,c.object
 				FROM users u 
+				LEFT JOIN capabilities c ON c.userid = u.id 
 				WHERE lower(u.name)=%s OR lower(u.mail)=%s`,
 				h.preparedSymbol,
 				h.preparedSymbol,
@@ -216,8 +223,10 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 		}
 	} else {
 		query = fmt.Sprintf(`
-			SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr
+			SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr,
+			       c.action,c.object
 			FROM users u 
+			LEFT JOIN capabilities c ON c.userid = u.id 
 			WHERE lower(u.name)=%s`,
 			h.preparedSymbol,
 		)
@@ -230,29 +239,32 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 	var sshKeys string
 	var custattrstr string
 	var passBcrypt, passSHA256, otpSecret, yubikey, givenName, sn, mail, loginShell, homedir sql.NullString
-
-	searchTerm := strings.ToLower(userName)
-	var err2 error
-
-	if searchByUPN && h.cfg.Behaviors.LegacyVersion >= 20231 {
-		err2 = h.database.cnx.QueryRowContext(
-			ctx,
-			query,
-			searchTerm, searchTerm,
-		).Scan(&user.Name, &user.UIDNumber, &user.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr)
-	} else {
-		err2 = h.database.cnx.QueryRowContext(
-			ctx,
-			query,
-			searchTerm,
-		).Scan(&user.Name, &user.UIDNumber, &user.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr)
-	}
+	var capabilityAction, capabilityObject sql.NullString
 
 	// Initialize capabilities to empty slice by default
 	user.Capabilities = []config.Capability{}
 
-	if err2 == nil {
+	var rows *sql.Rows
+	var err2 error
+
+	if searchByUPN && h.cfg.Behaviors.LegacyVersion >= 20231 {
+		rows, err2 = h.database.cnx.QueryContext(ctx, query, searchTerm, searchTerm)
+	} else {
+		rows, err2 = h.database.cnx.QueryContext(ctx, query, searchTerm)
+	}
+
+	if err2 != nil {
+		return false, user, err2
+	}
+	defer rows.Close()
+
+	// Process the first row to get user data
+	if rows.Next() {
 		found = true
+		err2 = rows.Scan(&user.Name, &user.UIDNumber, &user.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr, &capabilityAction, &capabilityObject)
+		if err2 != nil {
+			return false, user, err2
+		}
 
 		// Convert sql.NullString to regular strings
 		if passBcrypt.Valid {
@@ -301,30 +313,29 @@ func (h databaseHandler) FindUser(ctx context.Context, userName string, searchBy
 			user.SSHKeys = strings.Split(sshKeys, "\n")
 		}
 
-		// Query capabilities for this user using JOIN for better performance
-		capQuery := fmt.Sprintf(`
-			SELECT c.action, c.object 
-			FROM capabilities c 
-			JOIN users u ON c.userid = u.id 
-			WHERE u.name = %s`, h.preparedSymbol)
-
-		h.log.Debug().Str("query", capQuery).Str("userName", user.Name).Msg("FindUser capabilities query")
-
-		capRows, capErr := h.database.cnx.QueryContext(ctx, capQuery, user.Name)
-		if capErr == nil {
-			defer capRows.Close()
-			for capRows.Next() {
-				var capability config.Capability
-				scanErr := capRows.Scan(&capability.Action, &capability.Object)
-				if scanErr == nil {
-					user.Capabilities = append(user.Capabilities, capability)
-				}
-			}
-		} else {
-			h.log.Error().Err(capErr).Msg("FindUser capabilities query failed")
+		// Add first capability if it exists
+		if capabilityAction.Valid && capabilityObject.Valid {
+			user.Capabilities = append(user.Capabilities, config.Capability{
+				Action: capabilityAction.String,
+				Object: capabilityObject.String,
+			})
 		}
 
-		// Note: If capabilities query fails, we keep the empty slice initialized above
+		// Process remaining rows for additional capabilities
+		for rows.Next() {
+			err2 = rows.Scan(&user.Name, &user.UIDNumber, &user.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr, &capabilityAction, &capabilityObject)
+			if err2 != nil {
+				h.log.Error().Err(err2).Msg("Error scanning capability row")
+				continue
+			}
+
+			if capabilityAction.Valid && capabilityObject.Valid {
+				user.Capabilities = append(user.Capabilities, config.Capability{
+					Action: capabilityAction.String,
+					Object: capabilityObject.String,
+				})
+			}
+		}
 	}
 
 	return found, user, err2
@@ -337,6 +348,9 @@ func (h databaseHandler) FindGroup(ctx context.Context, groupName string) (f boo
 	group := config.Group{}
 	found := false
 
+	// Pre-compute lowercase search term once to avoid repeated string operations
+	searchTerm := strings.ToLower(groupName)
+
 	query := fmt.Sprintf(`
 		SELECT g.gidnumber FROM ldapgroups g WHERE lower(name)=%s`,
 		h.preparedSymbol,
@@ -347,7 +361,7 @@ func (h databaseHandler) FindGroup(ctx context.Context, groupName string) (f boo
 	err = h.database.cnx.QueryRowContext(
 		ctx,
 		query,
-		groupName,
+		searchTerm,
 	).Scan(&group.GIDNumber)
 
 	if err == nil {
@@ -368,10 +382,13 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 		return entries, err
 	}
 
+	// Use LEFT JOIN to fetch users and their capabilities in a single query
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
-		`SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr  
-		FROM users u`)
+		`SELECT u.name,u.uidnumber,u.primarygroup,u.passbcrypt,u.passsha256,u.otpsecret,u.yubikey,u.othergroups,u.givenname,u.sn,u.mail,u.loginshell,u.homedirectory,u.disabled,u.sshkeys,u.custattr,
+		        c.action,c.object
+		FROM users u 
+		LEFT JOIN capabilities c ON c.userid = u.id`)
 	if err != nil {
 		return entries, err
 	}
@@ -382,108 +399,130 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	var sshKeys string
 	var custattrstr string
 	var passBcrypt, passSHA256, otpSecret, yubikey, givenName, sn, mail, loginShell, homedir sql.NullString
+	var capabilityAction, capabilityObject sql.NullString
+	var userName string
+	var uidNumber, primaryGroup int
 
-	u := config.User{}
+	// Map to collect users and their capabilities
+	userMap := make(map[string]*config.User)
 
 	for rows.Next() {
-		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr)
+		err := rows.Scan(&userName, &uidNumber, &primaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr, &capabilityAction, &capabilityObject)
 		if err != nil {
 			return entries, err
 		}
 
-		// Convert sql.NullString to regular strings
-		if passBcrypt.Valid {
-			u.PassBcrypt = passBcrypt.String
+		// Check if we already have this user
+		user, exists := userMap[userName]
+		if !exists {
+			// Create new user
+			user = &config.User{
+				Name:         userName,
+				UIDNumber:    uidNumber,
+				PrimaryGroup: primaryGroup,
+				Capabilities: []config.Capability{},
+				CustomAttrs:  make(map[string]interface{}),
+			}
+
+			// Convert sql.NullString to regular strings
+			if passBcrypt.Valid {
+				user.PassBcrypt = passBcrypt.String
+			}
+			if passSHA256.Valid {
+				user.PassSHA256 = passSHA256.String
+			}
+			if otpSecret.Valid {
+				user.OTPSecret = otpSecret.String
+			}
+			if yubikey.Valid {
+				user.Yubikey = yubikey.String
+			}
+			if givenName.Valid {
+				user.GivenName = givenName.String
+			}
+			if sn.Valid {
+				user.SN = sn.String
+			}
+			if mail.Valid {
+				user.Mail = mail.String
+			}
+			if loginShell.Valid {
+				user.LoginShell = loginShell.String
+			}
+			if homedir.Valid {
+				user.Homedir = homedir.String
+			}
+
+			if disabled == 1 {
+				user.Disabled = true
+			}
+
+			// Convert comma-separated groups to slice of ints
+			user.OtherGroups = h.commaListToIntTable(ctx, otherGroups)
+
+			// Parse custom attributes JSON
+			if custattrstr != "" {
+				json.Unmarshal([]byte(custattrstr), &user.CustomAttrs)
+			}
+
+			// Parse SSH keys
+			if sshKeys != "" {
+				user.SSHKeys = strings.Split(sshKeys, "\n")
+			}
+
+			userMap[userName] = user
 		}
 
-		if passSHA256.Valid {
-			u.PassSHA256 = passSHA256.String
+		// Add capability if it exists
+		if capabilityAction.Valid && capabilityObject.Valid {
+			user.Capabilities = append(user.Capabilities, config.Capability{
+				Action: capabilityAction.String,
+				Object: capabilityObject.String,
+			})
 		}
+	}
 
-		if otpSecret.Valid {
-			u.OTPSecret = otpSecret.String
-		}
-
-		if yubikey.Valid {
-			u.Yubikey = yubikey.String
-		}
-
-		if givenName.Valid {
-			u.GivenName = givenName.String
-		}
-
-		if sn.Valid {
-			u.SN = sn.String
-		}
-
-		if mail.Valid {
-			u.Mail = mail.String
-		}
-
-		if loginShell.Valid {
-			u.LoginShell = loginShell.String
-		}
-
-		if homedir.Valid {
-			u.Homedir = homedir.String
-		}
-
-		if disabled == 1 {
-			u.Disabled = true
-		}
-
-		u.OtherGroups = h.commaListToIntTable(ctx, otherGroups)
-
-		// Parse custom attributes JSON
-		u.CustomAttrs = make(map[string]interface{})
-		if custattrstr != "" {
-			json.Unmarshal([]byte(custattrstr), &u.CustomAttrs)
-		}
-
-		// Parse SSH keys
-		if sshKeys != "" {
-			u.SSHKeys = strings.Split(sshKeys, "\n")
-		}
-
+	// Convert users map to LDAP entries
+	for _, user := range userMap {
 		attrs := []*ldap.EntryAttribute{}
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "cn", Values: []string{u.Name}})
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "uid", Values: []string{u.Name}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "cn", Values: []string{user.Name}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "uid", Values: []string{user.Name}})
 
-		if u.UIDNumber != 0 {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "uidNumber", Values: []string{fmt.Sprintf("%d", u.UIDNumber)}})
+		if user.UIDNumber != 0 {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "uidNumber", Values: []string{fmt.Sprintf("%d", user.UIDNumber)}})
 		}
-		if u.PrimaryGroup != 0 {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", u.PrimaryGroup)}})
+		if user.PrimaryGroup != 0 {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", user.PrimaryGroup)}})
 		}
 
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"posixAccount", "shadowAccount"}})
 
-		if u.GivenName != "" {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "givenName", Values: []string{u.GivenName}})
+		if user.GivenName != "" {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "givenName", Values: []string{user.GivenName}})
 		}
 
-		if u.SN != "" {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "sn", Values: []string{u.SN}})
+		if user.SN != "" {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "sn", Values: []string{user.SN}})
 		}
 
-		if u.Mail != "" {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "mail", Values: []string{u.Mail}})
+		if user.Mail != "" {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "mail", Values: []string{user.Mail}})
 		}
 
-		if u.LoginShell != "" {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "loginShell", Values: []string{u.LoginShell}})
+		if user.LoginShell != "" {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "loginShell", Values: []string{user.LoginShell}})
 		}
 
-		if u.Homedir != "" {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: "homeDirectory", Values: []string{u.Homedir}})
+		if user.Homedir != "" {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: "homeDirectory", Values: []string{user.Homedir}})
 		}
 
-		if len(u.SSHKeys) > 0 {
-			attrs = append(attrs, &ldap.EntryAttribute{Name: h.backend.SSHKeyAttr, Values: u.SSHKeys})
+		if len(user.SSHKeys) > 0 {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: h.backend.SSHKeyAttr, Values: user.SSHKeys})
 		}
 
 		// Handle custom attributes
-		for key, value := range u.CustomAttrs {
+		for key, value := range user.CustomAttrs {
 			if valStr, ok := value.(string); ok {
 				attrs = append(attrs, &ldap.EntryAttribute{Name: key, Values: []string{valStr}})
 			}
@@ -496,7 +535,7 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 			insertOuUsers = ",ou=users"
 		}
 
-		dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
+		dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], user.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, user.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
 		entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
 	}
 
