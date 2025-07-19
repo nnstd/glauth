@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -50,6 +51,17 @@ type sourceInfo struct {
 	waitUntil time.Time
 }
 
+// sourceInfoPool provides a pool of sourceInfo objects to reduce heap allocations
+var sourceInfoPool = sync.Pool{
+	New: func() interface{} {
+		return &sourceInfo{
+			lastSeen:  time.Time{},
+			failures:  nil, // Will be initialized when needed
+			waitUntil: time.Time{},
+		}
+	},
+}
+
 type LDAPOpsHelper struct {
 	sources     map[string]*sourceInfo
 	nextPruning time.Time
@@ -59,7 +71,7 @@ type LDAPOpsHelper struct {
 
 func NewLDAPOpsHelper(tracer trace.Tracer) LDAPOpsHelper {
 	helper := LDAPOpsHelper{
-		sources:     make(map[string]*sourceInfo),
+		sources:     make(map[string]*sourceInfo, 1000), // Pre-allocate with estimated capacity
 		nextPruning: time.Now(),
 		tracer:      tracer,
 	}
@@ -849,11 +861,12 @@ func (l *LDAPOpsHelper) isInTimeout(ctx context.Context, handler LDAPOpsHandler,
 	now := time.Now()
 	info, ok := l.sources[remoteAddr]
 	if !ok {
-		l.sources[remoteAddr] = &sourceInfo{
-			lastSeen:  now,
-			failures:  make(chan failedBind, cfg.Behaviors.NumberOfFailedBinds),
-			waitUntil: now,
-		}
+		// Get sourceInfo from pool to reduce heap allocation
+		info = sourceInfoPool.Get().(*sourceInfo)
+		info.lastSeen = now
+		info.failures = make(chan failedBind, cfg.Behaviors.NumberOfFailedBinds)
+		info.waitUntil = now
+		l.sources[remoteAddr] = info
 		return false
 	}
 	// update so that this source does not get pruned
@@ -902,6 +915,9 @@ func (l *LDAPOpsHelper) maybePutInTimeout(ctx context.Context, handler LDAPOpsHa
 	if l.nextPruning.Before(now) {
 		for sourceIP, sourceInfo := range l.sources {
 			if sourceInfo.lastSeen.Add(cfg.Behaviors.PruneSourcesOlderThan * time.Second).Before(now) {
+				// Return sourceInfo to pool before deleting
+				close(sourceInfo.failures)
+				sourceInfoPool.Put(sourceInfo)
 				delete(l.sources, sourceIP)
 			}
 		}

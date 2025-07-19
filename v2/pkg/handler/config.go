@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -18,6 +19,13 @@ import (
 	"github.com/nnstd/glauth/v2/pkg/config"
 	"github.com/nnstd/glauth/v2/pkg/stats"
 )
+
+// metricLabelsPool provides a pool of metric label maps to reduce heap allocations
+var metricLabelsPool = sync.Pool{
+	New: func() interface{} {
+		return make(map[string]string, 2) // operation and status
+	},
+}
 
 type configHandler struct {
 	backend     config.Backend
@@ -77,10 +85,19 @@ func (h configHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result 
 	start := time.Now()
 
 	defer func() {
-		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "bind", "status": fmt.Sprintf("%v", result)},
-			time.Since(start).Seconds(),
-		)
+		// Get metric labels from pool
+		labels := metricLabelsPool.Get().(map[string]string)
+		defer func() {
+			// Clear the map before returning to pool
+			for k := range labels {
+				delete(labels, k)
+			}
+			metricLabelsPool.Put(labels)
+		}()
+
+		labels["operation"] = "bind"
+		labels["status"] = fmt.Sprintf("%v", result)
+		h.monitor.SetResponseTimeMetric(labels, time.Since(start).Seconds())
 	}()
 
 	return h.ldohelper.Bind(ctx, h, bindDN, bindSimplePw, conn)
@@ -96,10 +113,19 @@ func (h configHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn 
 	start := time.Now()
 
 	defer func() {
-		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "search", "status": fmt.Sprintf("%v", result.ResultCode)},
-			time.Since(start).Seconds(),
-		)
+		// Get metric labels from pool
+		labels := metricLabelsPool.Get().(map[string]string)
+		defer func() {
+			// Clear the map before returning to pool
+			for k := range labels {
+				delete(labels, k)
+			}
+			metricLabelsPool.Put(labels)
+		}()
+
+		labels["operation"] = "search"
+		labels["status"] = fmt.Sprintf("%v", result.ResultCode)
+		h.monitor.SetResponseTimeMetric(labels, time.Since(start).Seconds())
 	}()
 
 	return h.ldohelper.Search(ctx, h, bindDN, searchReq, conn)
@@ -115,10 +141,19 @@ func (h configHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (
 	start := time.Now()
 
 	defer func() {
-		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "add", "status": fmt.Sprintf("%v", result)},
-			time.Since(start).Seconds(),
-		)
+		// Get metric labels from pool
+		labels := metricLabelsPool.Get().(map[string]string)
+		defer func() {
+			// Clear the map before returning to pool
+			for k := range labels {
+				delete(labels, k)
+			}
+			metricLabelsPool.Put(labels)
+		}()
+
+		labels["operation"] = "add"
+		labels["status"] = fmt.Sprintf("%v", result)
+		h.monitor.SetResponseTimeMetric(labels, time.Since(start).Seconds())
 	}()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -134,10 +169,19 @@ func (h configHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.C
 	start := time.Now()
 
 	defer func() {
-		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "modify", "status": fmt.Sprintf("%v", result)},
-			time.Since(start).Seconds(),
-		)
+		// Get metric labels from pool
+		labels := metricLabelsPool.Get().(map[string]string)
+		defer func() {
+			// Clear the map before returning to pool
+			for k := range labels {
+				delete(labels, k)
+			}
+			metricLabelsPool.Put(labels)
+		}()
+
+		labels["operation"] = "modify"
+		labels["status"] = fmt.Sprintf("%v", result)
+		h.monitor.SetResponseTimeMetric(labels, time.Since(start).Seconds())
 	}()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -153,10 +197,19 @@ func (h configHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (r
 	start := time.Now()
 
 	defer func() {
-		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "delete", "status": fmt.Sprintf("%v", result)},
-			time.Since(start).Seconds(),
-		)
+		// Get metric labels from pool
+		labels := metricLabelsPool.Get().(map[string]string)
+		defer func() {
+			// Clear the map before returning to pool
+			for k := range labels {
+				delete(labels, k)
+			}
+			metricLabelsPool.Put(labels)
+		}()
+
+		labels["operation"] = "delete"
+		labels["status"] = fmt.Sprintf("%v", result)
+		h.monitor.SetResponseTimeMetric(labels, time.Since(start).Seconds())
 	}()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -233,10 +286,12 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 
 	h.log.Debug().Str("hierarchy", hierarchy).Msg("FindPosixAccounts")
 
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, len(h.cfg.Users)) // Use actual user count
 
 	for _, u := range h.cfg.Users {
-		attrs := []*ldap.EntryAttribute{}
+		// Pre-allocate attributes slice with estimated capacity
+		attrs := make([]*ldap.EntryAttribute, 0, 25) // Estimate 25 attributes per user
 		for _, nameAttr := range h.backend.NameFormatAsArray {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: nameAttr, Values: []string{u.Name}})
 		}
@@ -298,7 +353,8 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 			for key, attr := range u.CustomAttrs {
 				switch typedattr := attr.(type) {
 				case []interface{}:
-					var values []string
+					// Pre-allocate values slice with estimated capacity
+					values := make([]string, 0, len(typedattr))
 					for _, v := range typedattr {
 						switch typedvalue := v.(type) {
 						case string:
@@ -335,10 +391,12 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 
 	asGroupOfUniqueNames := hierarchy == "ou=groups"
 
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, len(h.cfg.Groups)) // Use actual group count
 
 	for _, g := range h.cfg.Groups {
-		attrs := []*ldap.EntryAttribute{}
+		// Pre-allocate attributes slice with estimated capacity
+		attrs := make([]*ldap.EntryAttribute, 0, 10) // Estimate 10 attributes per group
 		for _, groupAttr := range h.backend.GroupFormatAsArray {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: groupAttr, Values: []string{g.Name}})
 		}
@@ -346,12 +404,14 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{g.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", g.GIDNumber)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "uniqueMember", Values: h.getGroupMemberDNs(ctx, g.GIDNumber)})
+
 		if asGroupOfUniqueNames {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"groupOfUniqueNames", "top"}})
 		} else {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "memberUid", Values: h.getGroupMemberIDs(ctx, g.GIDNumber)})
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"posixGroup", "top"}})
 		}
+
 		dn := fmt.Sprintf("%s=%s,%s,%s", h.backend.GroupFormatAsArray[0], g.Name, hierarchy, h.backend.BaseDN)
 		entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
 	}
@@ -382,7 +442,8 @@ func (h configHandler) getGroupMemberDNs(ctx context.Context, gid int) []string 
 	} else {
 		insertOuUsers = ",ou=users"
 	}
-	members := make(map[string]bool)
+	// Pre-allocate members map with estimated capacity
+	members := make(map[string]bool, 100) // Estimate 100 members per group
 
 	// Pre-compute format strings to avoid repeated allocations
 	nameFormat := h.backend.NameFormatAsArray[0] + "="
@@ -435,7 +496,7 @@ func (h configHandler) getGroupMemberDNs(ctx context.Context, gid int) []string 
 		}
 	}
 
-	// Pre-allocate result slice
+	// Pre-allocate result slice with exact capacity
 	m := make([]string, 0, len(members))
 	for k := range members {
 		m = append(m, k)
@@ -452,14 +513,18 @@ func (h configHandler) getGroupMemberIDs(ctx context.Context, gid int) []string 
 
 	h.log.Debug().Int("gid", gid).Msg("getGroupMemberIDs")
 
-	members := make(map[string]bool)
+	// Pre-allocate members map with estimated capacity
+	members := make(map[string]bool, 100) // Estimate 100 members per group
+
 	for _, u := range h.cfg.Users {
 		if u.PrimaryGroup == gid {
 			members[u.Name] = true
+			break
 		} else {
 			for _, othergid := range u.OtherGroups {
 				if othergid == gid {
 					members[u.Name] = true
+					break
 				}
 			}
 		}
@@ -481,7 +546,8 @@ func (h configHandler) getGroupMemberIDs(ctx context.Context, gid int) []string 
 		}
 	}
 
-	m := []string{}
+	// Pre-allocate result slice with exact capacity
+	m := make([]string, 0, len(members))
 	for k := range members {
 		m = append(m, k)
 	}
@@ -518,7 +584,7 @@ func (h configHandler) getGroupDNs(ctx context.Context, gids []int) []string {
 		}
 	}
 
-	g := []string{}
+	g := make([]string, 0, len(groups))
 	for k := range groups {
 		g = append(g, k)
 	}

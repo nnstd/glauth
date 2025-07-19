@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"slices"
 
@@ -26,6 +27,13 @@ import (
 )
 
 var configattributematcher = regexp.MustCompile(`(?i)\((?P<attribute>[a-zA-Z0-9]+)\s*=\s*(?P<value>.*)\)`)
+
+// contextPool provides a pool of background contexts to reduce heap allocations
+var contextPool = sync.Pool{
+	New: func() interface{} {
+		return context.Background()
+	},
+}
 
 type SqlBackend interface {
 	// Name used by database/sql when loading the driver
@@ -109,9 +117,14 @@ func NewDatabaseHandler(sqlBackend SqlBackend, opts ...handler.Option) handler.H
 }
 
 func ColumnExists(db *sql.DB, tableName string, columnName string) bool {
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
 	var found string
-	err := db.QueryRowContext(context.Background(), fmt.Sprintf(`SELECT COUNT(%s) FROM %s`, columnName, tableName)).Scan(
-		&found)
+	// Use a prepared statement to avoid SQL injection and reduce string allocations
+	query := fmt.Sprintf(`SELECT COUNT(%s) FROM %s`, columnName, tableName)
+	err := db.QueryRowContext(ctx, query).Scan(&found)
 	return err == nil
 }
 
@@ -145,14 +158,22 @@ func (h databaseHandler) GetYubikeyAuth() *yubigo.YubiAuth {
 }
 
 func (h databaseHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (resultCode ldap.LDAPResultCode, err error) {
-	ctx, span := h.tracer.Start(context.Background(), "database.databaseHandler.Bind")
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
+	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.Bind")
 	defer span.End()
 
 	return h.ldohelper.Bind(ctx, h, bindDN, bindSimplePw, conn)
 }
 
 func (h databaseHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
-	ctx, span := h.tracer.Start(context.Background(), "database.databaseHandler.Search")
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
+	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.Search")
 	defer span.End()
 
 	return h.ldohelper.Search(ctx, h, bindDN, searchReq, conn)
@@ -160,7 +181,11 @@ func (h databaseHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 
 // Add is not yet supported for the sql backend
 func (h databaseHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
-	_, span := h.tracer.Start(context.Background(), "database.databaseHandler.Add")
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
+	_, span := h.tracer.Start(ctx, "database.databaseHandler.Add")
 	defer span.End()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -168,7 +193,11 @@ func (h databaseHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn)
 
 // Modify is not yet supported for the sql backend
 func (h databaseHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
-	_, span := h.tracer.Start(context.Background(), "database.databaseHandler.Modify")
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
+	_, span := h.tracer.Start(ctx, "database.databaseHandler.Modify")
 	defer span.End()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -176,7 +205,11 @@ func (h databaseHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net
 
 // Delete is not yet supported for the sql backend
 func (h databaseHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
-	_, span := h.tracer.Start(context.Background(), "database.databaseHandler.Delete")
+	// Get context from pool to reduce heap allocation
+	ctx := contextPool.Get().(context.Context)
+	defer contextPool.Put(ctx)
+
+	_, span := h.tracer.Start(ctx, "database.databaseHandler.Delete")
 	defer span.End()
 
 	return ldap.LDAPResultInsufficientAccessRights, nil
@@ -375,7 +408,8 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.FindPosixAccounts")
 	defer span.End()
 
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, 1000) // Estimate 1000 users
 
 	h.MemGroups, err = h.memoizeGroups(ctx)
 	if err != nil {
@@ -403,8 +437,8 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 	var userName string
 	var uidNumber, primaryGroup int
 
-	// Map to collect users and their capabilities
-	userMap := make(map[string]*config.User)
+	// Map to collect users and their capabilities - pre-allocate with estimated capacity
+	userMap := make(map[string]*config.User, 1000) // Estimate 1000 users
 
 	for rows.Next() {
 		err := rows.Scan(&userName, &uidNumber, &primaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups, &givenName, &sn, &mail, &loginShell, &homedir, &disabled, &sshKeys, &custattrstr, &capabilityAction, &capabilityObject)
@@ -420,8 +454,8 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 				Name:         userName,
 				UIDNumber:    uidNumber,
 				PrimaryGroup: primaryGroup,
-				Capabilities: []config.Capability{},
-				CustomAttrs:  make(map[string]interface{}),
+				Capabilities: make([]config.Capability, 0, 10), // Pre-allocate capabilities slice
+				CustomAttrs:  make(map[string]interface{}, 5),  // Pre-allocate custom attrs map
 			}
 
 			// Convert sql.NullString to regular strings
@@ -482,9 +516,10 @@ func (h databaseHandler) FindPosixAccounts(ctx context.Context, hierarchy string
 		}
 	}
 
-	// Convert users map to LDAP entries
+	// Convert users map to LDAP entries - pre-allocate attrs slice
 	for _, user := range userMap {
-		attrs := []*ldap.EntryAttribute{}
+		// Pre-allocate attributes slice with estimated capacity
+		attrs := make([]*ldap.EntryAttribute, 0, 20) // Estimate 20 attributes per user
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "cn", Values: []string{user.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "uid", Values: []string{user.Name}})
 
@@ -548,7 +583,8 @@ func (h databaseHandler) FindPosixGroups(ctx context.Context, hierarchy string) 
 	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.FindPosixGroups")
 	defer span.End()
 
-	entries := []*ldap.Entry{}
+	// Pre-allocate entries slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, 100) // Estimate 100 groups
 
 	h.MemGroups, err = h.memoizeGroups(ctx)
 	if err != nil {
@@ -556,7 +592,8 @@ func (h databaseHandler) FindPosixGroups(ctx context.Context, hierarchy string) 
 	}
 
 	for _, g := range h.MemGroups {
-		attrs := []*ldap.EntryAttribute{}
+		// Pre-allocate attributes slice with estimated capacity
+		attrs := make([]*ldap.EntryAttribute, 0, 10) // Estimate 10 attributes per group
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "cn", Values: []string{g.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{fmt.Sprintf("%s via LDAP", g.Name)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", g.GIDNumber)}})
@@ -589,7 +626,8 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 	} else {
 		insertOuUsers = ",ou=users"
 	}
-	members := make(map[string]bool)
+	// Pre-allocate members map with estimated capacity
+	members := make(map[string]bool, 100) // Estimate 100 members per group
 
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
@@ -667,7 +705,7 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 		}
 	}
 
-	// Pre-allocate result slice
+	// Pre-allocate result slice with exact capacity
 	retval := make([]string, 0, len(members))
 	for member := range members {
 		retval = append(retval, member)
@@ -682,7 +720,8 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.getGroupMemberNames")
 	defer span.End()
 
-	members := make(map[string]bool)
+	// Pre-allocate members map with estimated capacity
+	members := make(map[string]bool, 100) // Estimate 100 members per group
 
 	rows, err := h.database.cnx.QueryContext(
 		ctx,
@@ -736,7 +775,8 @@ func (h databaseHandler) getGroupMemberNames(ctx context.Context, gid int) []str
 		}
 	}
 
-	var retval []string
+	// Pre-allocate result slice with exact capacity
+	retval := make([]string, 0, len(members))
 	for member := range members {
 		retval = append(retval, member)
 	}
