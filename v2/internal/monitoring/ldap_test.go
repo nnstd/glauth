@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glauth/ldap"
 	"github.com/rs/zerolog"
 	"go.uber.org/mock/gomock"
 )
@@ -17,7 +16,13 @@ func TestNewLDAPMonitorWatcherRunsOnASchedule(t *testing.T) {
 	mockMonitor := NewMockMonitorInterface(ctrl)
 	mockLDAPServer := NewMockLDAPServerInterface(ctrl)
 
-	stats := ldap.Stats{}
+	// Create a stats struct without the mutex to avoid copying issues
+	stats := StatsData{
+		Conns:    0,
+		Binds:    0,
+		Unbinds:  0,
+		Searches: 0,
+	}
 
 	mockLDAPServer.EXPECT().SetStats(true).Times(1)
 	mockLDAPServer.EXPECT().GetStats().MinTimes(1).Return(stats)

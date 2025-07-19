@@ -162,7 +162,9 @@ func NewServer(opts ...Option) (*LdapSvc, error) {
 		backendCounter++
 	}
 
-	monitoring.NewLDAPMonitorWatcher(s.l, s.monitor, &s.log)
+	// Use adapter to avoid mutex copying issues
+	ldapAdapter := monitoring.NewLDAPServerAdapter(s.l)
+	monitoring.NewLDAPMonitorWatcher(ldapAdapter, s.monitor, &s.log)
 
 	return &s, nil
 }
