@@ -430,6 +430,7 @@ func (l LDAPOpsHelper) searchMaybeSchemaQuery(ctx context.Context, h LDAPOpsHand
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "modifyTimeStamp", Values: []string{"Mar 8, 2021, 12:46:29 PM PST (20210308204629Z)"}})
 	// Iterate through schema attributes provided in schema/ directory
 	filenames, _ := os.ReadDir("schema")
+
 	for _, filename := range filenames {
 		attributename := new(string)
 		*attributename = filename.Name()
@@ -446,10 +447,13 @@ func (l LDAPOpsHelper) searchMaybeSchemaQuery(ctx context.Context, h LDAPOpsHand
 		}
 		attrs = append(attrs, &ldap.EntryAttribute{Name: filename.Name(), Values: values})
 	}
+
 	attrs = l.collectRequestedAttributesBack(ctx, attrs, searchReq)
 	entries = append(entries, &ldap.Entry{DN: searchBaseDN, Attributes: attrs})
+
 	stats.Frontend.Add("search_successes", 1)
 	h.GetLog().Info().Str("filter", searchReq.Filter).Msg("AP: Schema Discovery OK")
+
 	return entries, ldap.LDAPResultSuccess, nil
 }
 
@@ -465,10 +469,10 @@ func (l LDAPOpsHelper) searchMaybeTopLevelNodes(ctx context.Context, h LDAPOpsHa
 	h.GetLog().Info().Str("special case", "top-level browse").Msg("Search request")
 	entries := []*ldap.Entry{}
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
-		entries = append(entries, l.topLevelRootNode(ctx, searchBaseDN))
+		entries = append(entries, l.topLevelRootNode(searchBaseDN))
 	}
-	entries = append(entries, l.topLevelGroupsNode(ctx, searchBaseDN, "groups"))
-	entries = append(entries, l.topLevelUsersNode(ctx, searchBaseDN))
+	entries = append(entries, l.topLevelGroupsNode(searchBaseDN, "groups"))
+	entries = append(entries, l.topLevelUsersNode(searchBaseDN))
 	if searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=users")
 		if err != nil {
@@ -501,7 +505,7 @@ func (l LDAPOpsHelper) searchMaybeTopLevelGroupsNode(ctx context.Context, h LDAP
 	h.GetLog().Info().Str("special case", "top-level groups node").Msg("Search request")
 	entries := []*ldap.Entry{}
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
-		entries = append(entries, l.topLevelGroupsNode(ctx, searchBaseDN, "groups"))
+		entries = append(entries, l.topLevelGroupsNode(searchBaseDN, "groups"))
 	}
 	if searchReq.Scope == ldap.ScopeSingleLevel || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=groups")
@@ -528,7 +532,7 @@ func (l LDAPOpsHelper) searchMaybeTopLevelUsersNode(ctx context.Context, h LDAPO
 	h.GetLog().Info().Str("special case", "top-level users node").Msg("Search request")
 	entries := []*ldap.Entry{}
 	if searchReq.Scope == ldap.ScopeBaseObject || searchReq.Scope == ldap.ScopeWholeSubtree {
-		entries = append(entries, l.topLevelUsersNode(ctx, searchBaseDN))
+		entries = append(entries, l.topLevelUsersNode(searchBaseDN))
 	}
 	if searchReq.Scope == ldap.ScopeSingleLevel || searchReq.Scope == ldap.ScopeWholeSubtree {
 		groupentries, err := h.FindPosixGroups(ctx, "ou=users")
@@ -616,8 +620,10 @@ func (l LDAPOpsHelper) searchMaybePosixAccounts(ctx context.Context, h LDAPOpsHa
 		return nil, ldap.LDAPResultOperationsError
 	}
 
+	// Pre-allocate slice with estimated capacity
+	entries := make([]*ldap.Entry, 0, len(unscopedEntries))
+
 	// Filter out entries, that are not in the search base dn
-	entries := []*ldap.Entry{}
 	for _, e := range unscopedEntries {
 		if strings.HasSuffix(e.DN, searchBaseDN) {
 			entries = append(entries, e)
@@ -629,18 +635,22 @@ func (l LDAPOpsHelper) searchMaybePosixAccounts(ctx context.Context, h LDAPOpsHa
 	return entries, ldap.LDAPResultSuccess
 }
 
-func (l LDAPOpsHelper) topLevelRootNode(ctx context.Context, searchBaseDN string) *ldap.Entry {
-	attrs := []*ldap.EntryAttribute{}
+func (l LDAPOpsHelper) topLevelRootNode(searchBaseDN string) *ldap.Entry {
+	// Pre-allocate slice with estimated capacity
 	dnBits := strings.Split(searchBaseDN, ",")
+	attrs := make([]*ldap.EntryAttribute, 0, len(dnBits)+1) // +1 for objectClass
+
 	for _, dnBit := range dnBits {
 		chunk := strings.Split(dnBit, "=")
-		attrs = append(attrs, &ldap.EntryAttribute{Name: chunk[0], Values: []string{chunk[1]}})
+		if len(chunk) >= 2 {
+			attrs = append(attrs, &ldap.EntryAttribute{Name: chunk[0], Values: []string{chunk[1]}})
+		}
 	}
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"organizationalUnit", "dcObject", "top"}})
 	return &ldap.Entry{DN: searchBaseDN, Attributes: attrs}
 }
 
-func (l LDAPOpsHelper) topLevelGroupsNode(ctx context.Context, searchBaseDN string, hierarchy string) *ldap.Entry {
+func (l LDAPOpsHelper) topLevelGroupsNode(searchBaseDN string, hierarchy string) *ldap.Entry {
 	attrs := []*ldap.EntryAttribute{}
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "ou", Values: []string{"groups"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"organizationalUnit", "top"}})
@@ -652,7 +662,7 @@ func (l LDAPOpsHelper) topLevelGroupsNode(ctx context.Context, searchBaseDN stri
 	return &ldap.Entry{DN: dn, Attributes: attrs}
 }
 
-func (l LDAPOpsHelper) topLevelUsersNode(ctx context.Context, searchBaseDN string) *ldap.Entry {
+func (l LDAPOpsHelper) topLevelUsersNode(searchBaseDN string) *ldap.Entry {
 	attrs := []*ldap.EntryAttribute{}
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "ou", Values: []string{"users"}})
 	attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"organizationalUnit", "top"}})
@@ -683,7 +693,10 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 
 	var user config.User
 
+	// Pre-compute format strings to avoid repeated allocations
 	baseDN := strings.ToLower("," + h.GetBackend().BaseDN)
+	nameFormatPrefix := h.GetBackend().NameFormatAsArray[0] + "="
+	groupFormatPrefix := h.GetBackend().GroupFormatAsArray[0] + "="
 
 	// Special Case: bind using UPN
 	// Not using mail.ParseAddress/1 because we would allow incorrectly formatted UPNs
@@ -711,10 +724,10 @@ func (l LDAPOpsHelper) findUser(ctx context.Context, h LDAPOpsHandler, bindDN st
 		userName := ""
 
 		if len(parts) == 1 {
-			userName = strings.TrimPrefix(parts[0], h.GetBackend().NameFormatAsArray[0]+"=")
+			userName = strings.TrimPrefix(parts[0], nameFormatPrefix)
 		} else if len(parts) == 2 || (len(parts) == 3 && parts[2] == "ou=users") {
-			userName = strings.TrimPrefix(parts[0], h.GetBackend().NameFormatAsArray[0]+"=")
-			groupName = strings.TrimPrefix(parts[1], h.GetBackend().GroupFormatAsArray[0]+"=")
+			userName = strings.TrimPrefix(parts[0], nameFormatPrefix)
+			groupName = strings.TrimPrefix(parts[1], groupFormatPrefix)
 		} else {
 			h.GetLog().Debug().Str("binddn", bindDN).Int("numparts", len(parts)).Msg("Authentication failed: BindDN should have only one or two parts - returning Invalid credentials")
 			h.GetLog().Info().Str("binddn", bindDN).Int("numparts", len(parts)).Msg("BindDN should have only one or two parts")
@@ -907,5 +920,6 @@ func (l LDAPOpsHelper) getAddr(ctx context.Context, conn net.Conn) string {
 	if sep == -1 {
 		return fullAddr
 	}
-	return fullAddr[0:sep]
+	// Use string slicing to avoid allocation - this returns a view into the original string
+	return fullAddr[:sep]
 }

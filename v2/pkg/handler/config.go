@@ -383,15 +383,39 @@ func (h configHandler) getGroupMemberDNs(ctx context.Context, gid int) []string 
 		insertOuUsers = ",ou=users"
 	}
 	members := make(map[string]bool)
+
+	// Pre-compute format strings to avoid repeated allocations
+	nameFormat := h.backend.NameFormatAsArray[0] + "="
+	groupFormat := h.backend.GroupFormatAsArray[0] + "="
+	baseDN := h.backend.BaseDN
+
 	for _, u := range h.cfg.Users {
 		if u.PrimaryGroup == gid {
-			dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
-			members[dn] = true
+			// Use strings.Builder for efficient string concatenation
+			var dn strings.Builder
+			dn.WriteString(nameFormat)
+			dn.WriteString(u.Name)
+			dn.WriteString(",")
+			dn.WriteString(groupFormat)
+			dn.WriteString(h.getGroupName(ctx, u.PrimaryGroup))
+			dn.WriteString(insertOuUsers)
+			dn.WriteString(",")
+			dn.WriteString(baseDN)
+			members[dn.String()] = true
 		} else {
 			for _, othergid := range u.OtherGroups {
 				if othergid == gid {
-					dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
-					members[dn] = true
+					// Use strings.Builder for efficient string concatenation
+					var dn strings.Builder
+					dn.WriteString(nameFormat)
+					dn.WriteString(u.Name)
+					dn.WriteString(",")
+					dn.WriteString(groupFormat)
+					dn.WriteString(h.getGroupName(ctx, u.PrimaryGroup))
+					dn.WriteString(insertOuUsers)
+					dn.WriteString(",")
+					dn.WriteString(baseDN)
+					members[dn.String()] = true
 				}
 			}
 		}
@@ -411,7 +435,8 @@ func (h configHandler) getGroupMemberDNs(ctx context.Context, gid int) []string 
 		}
 	}
 
-	m := []string{}
+	// Pre-allocate result slice
+	m := make([]string, 0, len(members))
 	for k := range members {
 		m = append(m, k)
 	}

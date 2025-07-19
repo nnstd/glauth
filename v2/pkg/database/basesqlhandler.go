@@ -607,6 +607,11 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 
 	u := config.User{}
 
+	// Pre-compute format strings to avoid repeated allocations
+	nameFormat := h.backend.NameFormatAsArray[0] + "="
+	groupFormat := h.backend.GroupFormatAsArray[0] + "="
+	baseDN := h.backend.BaseDN
+
 	for rows.Next() {
 		err := rows.Scan(&u.Name, &u.UIDNumber, &u.PrimaryGroup, &passBcrypt, &passSHA256, &otpSecret, &yubikey, &otherGroups)
 		if err != nil {
@@ -631,20 +636,39 @@ func (h databaseHandler) getGroupMemberDNs(ctx context.Context, gid int) []strin
 		}
 
 		if u.PrimaryGroup == gid {
-			dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
-			members[dn] = true
+			// Use strings.Builder for efficient string concatenation
+			var dn strings.Builder
+			dn.WriteString(nameFormat)
+			dn.WriteString(u.Name)
+			dn.WriteString(",")
+			dn.WriteString(groupFormat)
+			dn.WriteString(h.getGroupName(ctx, u.PrimaryGroup))
+			dn.WriteString(insertOuUsers)
+			dn.WriteString(",")
+			dn.WriteString(baseDN)
+			members[dn.String()] = true
 		} else {
 			u.OtherGroups = h.commaListToIntTable(ctx, otherGroups)
 			for _, othergid := range u.OtherGroups {
 				if othergid == gid {
-					dn := fmt.Sprintf("%s=%s,%s=%s%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), insertOuUsers, h.backend.BaseDN)
-					members[dn] = true
+					// Use strings.Builder for efficient string concatenation
+					var dn strings.Builder
+					dn.WriteString(nameFormat)
+					dn.WriteString(u.Name)
+					dn.WriteString(",")
+					dn.WriteString(groupFormat)
+					dn.WriteString(h.getGroupName(ctx, u.PrimaryGroup))
+					dn.WriteString(insertOuUsers)
+					dn.WriteString(",")
+					dn.WriteString(baseDN)
+					members[dn.String()] = true
 				}
 			}
 		}
 	}
 
-	var retval []string
+	// Pre-allocate result slice
+	retval := make([]string, 0, len(members))
 	for member := range members {
 		retval = append(retval, member)
 	}
@@ -739,7 +763,14 @@ func (h databaseHandler) memoizeGroups(ctx context.Context) ([]config.Group, err
 	ctx, span := h.tracer.Start(ctx, "database.databaseHandler.memoizeGroups")
 	defer span.End()
 
-	var groups []config.Group
+	// First, count the number of groups to pre-allocate slice
+	var count int
+	err := h.database.cnx.QueryRowContext(ctx, "SELECT COUNT(*) FROM ldapgroups").Scan(&count)
+	if err != nil {
+		return nil, err
+	}
+
+	groups := make([]config.Group, 0, count)
 
 	rows, err := h.database.cnx.QueryContext(ctx, "SELECT name, gidnumber FROM ldapgroups")
 	if err != nil {
@@ -763,13 +794,21 @@ func (h databaseHandler) commaListToIntTable(ctx context.Context, commaList stri
 	_, span := h.tracer.Start(ctx, "database.databaseHandler.commaListToIntTable")
 	defer span.End()
 
-	var intTable []int
 	if commaList == "" {
-		return intTable
+		return nil
 	}
 
-	for _, stringGroup := range strings.Split(commaList, ",") {
-		trimmed := strings.TrimSpace(stringGroup)
+	// Count commas to pre-allocate slice capacity
+	commaCount := strings.Count(commaList, ",")
+	intTable := make([]int, 0, commaCount+1) // +1 for the last element
+
+	// Use strings.FieldsFunc for more efficient splitting
+	parts := strings.FieldsFunc(commaList, func(r rune) bool {
+		return r == ','
+	})
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
 			if converted, err := strconv.Atoi(trimmed); err == nil {
 				intTable = append(intTable, converted)
