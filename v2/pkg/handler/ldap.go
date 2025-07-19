@@ -48,6 +48,13 @@ type ldapHandler struct {
 		lastHash uint64
 		mu       sync.RWMutex
 	}
+
+	// Connection pool for reusing LDAP connections
+	connPool struct {
+		connections map[string]chan *ldap.Conn
+		mu          sync.RWMutex
+		maxPoolSize int
+	}
 }
 
 type ldapSession struct {
@@ -85,6 +92,10 @@ func NewLdapHandler(opts ...Option) Handler {
 		tracer:   options.Tracer,
 	}
 
+	// Initialize connection pool
+	handler.connPool.connections = make(map[string]chan *ldap.Conn)
+	handler.connPool.maxPoolSize = 10 // Maximum connections per server
+
 	// parse LDAP URLs
 	for _, ldapurl := range handler.backend.Servers {
 		l, err := parseURL(ldapurl)
@@ -93,6 +104,10 @@ func NewLdapHandler(opts ...Option) Handler {
 			os.Exit(1)
 		}
 		handler.servers = append(handler.servers, l)
+
+		// Initialize connection pool for this server
+		serverKey := fmt.Sprintf("%s:%d", l.Hostname, l.Port)
+		handler.connPool.connections[serverKey] = make(chan *ldap.Conn, handler.connPool.maxPoolSize)
 	}
 
 	// test server connectivity before listening, then keep it updated
@@ -427,8 +442,25 @@ func (h *ldapHandler) FindGroup(ctx context.Context, groupName string) (found bo
 }
 
 func (h *ldapHandler) Close(boundDn string, conn net.Conn) error {
+	id := connID(conn)
+
+	// Get the session to retrieve the LDAP connection
+	if sessionValue, ok := h.sessions.Load(id); ok {
+		if session, ok := sessionValue.(ldapSession); ok {
+			// Get the server info to return connection to the right pool
+			server, err := h.getBestServer()
+			if err == nil {
+				// Return connection to pool instead of closing it
+				h.returnConnectionToPool(server, session.ldap)
+			} else {
+				// If we can't determine the server, close the connection
+				session.ldap.Close()
+			}
+		}
+	}
+
 	conn.Close() // close connection to the server when then client is closed
-	h.sessions.Delete(connID(conn))
+	h.sessions.Delete(id)
 	stats.Frontend.Add("closes", 1)
 	stats.Backend.Add("closes", 1)
 	return nil
@@ -476,27 +508,14 @@ func (h *ldapHandler) getSession(conn net.Conn) (ldapSession, error) {
 		}
 	}
 
-	// Create new server connection if session doesn't exist
-	var l *ldap.Conn
-
-	server, err := h.getBestServer() // pick the best server
+	// Get best server
+	server, err := h.getBestServer()
 	if err != nil {
 		return ldapSession{}, err
 	}
 
-	dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
-
-	switch server.Scheme {
-	case "ldaps":
-		tlsCfg := &tls.Config{}
-		if h.backend.Insecure {
-			tlsCfg.InsecureSkipVerify = true
-		}
-		l, err = ldap.DialTLS("tcp", dest, tlsCfg)
-	case "ldap":
-		l, err = ldap.Dial("tcp", dest)
-	}
-
+	// Try to get connection from pool first
+	l, err := h.getConnectionFromPool(server)
 	if err != nil {
 		select {
 		case h.doPing <- true: // non-blocking send
@@ -516,32 +535,24 @@ func (h *ldapHandler) ping() error {
 	for k, s := range h.servers {
 		var l *ldap.Conn
 		var err error
-		dest := fmt.Sprintf("%s:%d", s.Hostname, s.Port)
 		start := time.Now()
 
-		switch h.servers[0].Scheme {
-		case "ldaps":
-			tlsCfg := &tls.Config{}
-			if h.backend.Insecure {
-				tlsCfg.InsecureSkipVerify = true
-			}
-			l, err = ldap.DialTLS("tcp", dest, tlsCfg)
-		case "ldap":
-			l, err = ldap.Dial("tcp", dest)
-		}
+		// Try to get connection from pool first
+		l, err = h.getConnectionFromPool(s)
 
 		elapsed := time.Since(start)
 		h.serversLock.Lock()
 
 		if err != nil || l == nil {
-			h.log.Fatal().Str("hostname", s.Hostname).Int("port", s.Port).Err(err).Msg("server ping failed")
+			h.log.Error().Str("hostname", s.Hostname).Int("port", s.Port).Err(err).Msg("server ping failed")
 			h.servers[k].Ping = 0
 			h.servers[k].Status = Down
 		} else {
 			healthy = true
 			h.servers[k].Ping = elapsed
 			h.servers[k].Status = Up
-			l.Close() // prank caller
+			// Return the connection to the pool instead of closing it
+			h.returnConnectionToPool(s, l)
 		}
 
 		h.serversLock.Unlock()
@@ -589,6 +600,109 @@ func (h *ldapHandler) getBestServer() (ldapBackend, error) {
 func connID(conn net.Conn) string {
 	key := conn.LocalAddr().String() + conn.RemoteAddr().String()
 	return fmt.Sprintf("%x", xxhash.Sum64String(key))
+}
+
+// createConnection creates a new LDAP connection to the specified server
+func (h *ldapHandler) createConnection(server ldapBackend) (*ldap.Conn, error) {
+	dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+
+	switch server.Scheme {
+	case "ldaps":
+		tlsCfg := &tls.Config{}
+		if h.backend.Insecure {
+			tlsCfg.InsecureSkipVerify = true
+		}
+		return ldap.DialTLS("tcp", dest, tlsCfg)
+	case "ldap":
+		return ldap.Dial("tcp", dest)
+	default:
+		return nil, fmt.Errorf("unsupported LDAP scheme: %s", server.Scheme)
+	}
+}
+
+// getConnectionFromPool tries to get a connection from the pool, creates a new one if pool is empty
+func (h *ldapHandler) getConnectionFromPool(server ldapBackend) (*ldap.Conn, error) {
+	serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+
+	h.connPool.mu.RLock()
+	pool, exists := h.connPool.connections[serverKey]
+	h.connPool.mu.RUnlock()
+
+	if !exists {
+		// Pool doesn't exist for this server, create new connection
+		return h.createConnection(server)
+	}
+
+	// Try to get connection from pool
+	select {
+	case conn := <-pool:
+		// Check if connection is still valid
+		if conn != nil {
+			// For now, assume the connection is valid if it's not nil
+			// In a production environment, you might want to add a more sophisticated
+			// health check here, but be careful not to add too much overhead
+			return conn, nil
+		}
+	default:
+		// Pool is empty, create new connection
+	}
+
+	// Create new connection
+	return h.createConnection(server)
+}
+
+// returnConnectionToPool returns a connection to the pool if there's space
+func (h *ldapHandler) returnConnectionToPool(server ldapBackend, conn *ldap.Conn) {
+	if conn == nil {
+		return
+	}
+
+	serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+
+	h.connPool.mu.RLock()
+	pool, exists := h.connPool.connections[serverKey]
+	h.connPool.mu.RUnlock()
+
+	if !exists {
+		// Pool doesn't exist, close connection
+		conn.Close()
+		return
+	}
+
+	// Try to return connection to pool
+	select {
+	case pool <- conn:
+		// Successfully returned to pool
+		h.log.Debug().Str("server", serverKey).Msg("Connection returned to pool")
+	default:
+		// Pool is full, close connection
+		conn.Close()
+		h.log.Debug().Str("server", serverKey).Msg("Pool full, connection closed")
+	}
+}
+
+// cleanupConnectionPool closes all connections in the pool
+func (h *ldapHandler) cleanupConnectionPool() {
+	h.connPool.mu.Lock()
+	defer h.connPool.mu.Unlock()
+
+	for serverKey, pool := range h.connPool.connections {
+		closeCount := 0
+		for {
+			select {
+			case conn := <-pool:
+				if conn != nil {
+					conn.Close()
+					closeCount++
+				}
+			default:
+				// Pool is empty
+				goto nextPool
+			}
+		}
+	nextPool:
+		h.log.Info().Str("server", serverKey).Int("connections_closed", closeCount).Msg("Cleaned up connection pool")
+	}
 }
 
 // computeServerHash computes a fast hash of server status for change detection
