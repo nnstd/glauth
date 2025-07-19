@@ -29,11 +29,9 @@ if [[ ! `which ldapsearch` ]]; then
 	sudo apt-get -qq update && sudo apt-get -qq install -y ldap-utils || exit 1;
 fi
 
-# Display version string
 echo "";
-echo ""
-echo "Version string of tested binary:"
-"$CI_BUILD_DIR/bin/linuxamd64/glauth" --version
+
+go build -o "$CI_BUILD_DIR/bin/linuxamd64/glauth" .
 echo ""
 
 # Start in background, capture PID

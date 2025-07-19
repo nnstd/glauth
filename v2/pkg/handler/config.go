@@ -540,7 +540,6 @@ func (h configHandler) getGroupMemberIDs(ctx context.Context, gid int) []string 
 	for _, u := range h.cfg.Users {
 		if u.PrimaryGroup == gid {
 			members[u.Name] = true
-			break
 		} else {
 			for _, othergid := range u.OtherGroups {
 				if othergid == gid {
