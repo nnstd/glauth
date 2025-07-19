@@ -48,8 +48,10 @@ func (a *API) resetCountersHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	// Encode and send response
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	// Encode and send response using a more efficient approach
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "") // Disable indentation for smaller response size
+	if err := encoder.Encode(response); err != nil {
 		a.logger.Error().Err(err).Msg("Failed to encode reset counters response")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return

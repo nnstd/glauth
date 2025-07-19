@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cespare/xxhash"
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
 
@@ -29,28 +29,33 @@ import (
 var ldapattributematcher = regexp.MustCompile(`(?i)(?P<attribute>[a-zA-Z0-9]+)\s*=\s*(?P<value>.*)`)
 
 type ldapHandler struct {
-	backend  config.Backend
-	handlers HandlerWrapper
-	doPing   chan bool
-	log      *zerolog.Logger
-	lock     *sync.Mutex // for sessions and servers
-	sessions map[string]ldapSession
-	servers  []ldapBackend
-	helper   Handler
-	attm     *regexp.Regexp
+	backend     config.Backend
+	handlers    HandlerWrapper
+	doPing      chan bool
+	log         *zerolog.Logger
+	sessions    sync.Map // for sessions - using sync.Map for better concurrency
+	servers     []ldapBackend
+	serversLock sync.RWMutex // for servers - using RWMutex for read-heavy operations
+	helper      Handler
+	attm        *regexp.Regexp
 
 	monitor monitoring.MonitorInterface
 	tracer  trace.Tracer
-}
 
-// global lock for ldapHandler sessions & servers manipulation
-var ldaplock sync.Mutex
+	// Cache for server status JSON to avoid repeated marshaling
+	serverStatusCache struct {
+		json     string
+		lastHash uint64
+		mu       sync.RWMutex
+	}
+}
 
 type ldapSession struct {
 	id   string
 	c    net.Conn
 	ldap *ldap.Conn
 }
+
 type ldapBackendStatus int
 
 const (
@@ -72,11 +77,9 @@ func NewLdapHandler(opts ...Option) Handler {
 	handler := ldapHandler{ // set non-zero-value defaults here
 		backend:  options.Backend,
 		handlers: options.Handlers,
-		sessions: make(map[string]ldapSession),
 		doPing:   make(chan bool),
 		log:      options.Logger,
 		helper:   options.Helper,
-		lock:     &ldaplock,
 		attm:     ldapattributematcher,
 		monitor:  options.Monitor,
 		tracer:   options.Tracer,
@@ -95,10 +98,10 @@ func NewLdapHandler(opts ...Option) Handler {
 	// test server connectivity before listening, then keep it updated
 	handler.monitorServers()
 
-	return handler
+	return &handler
 }
 
-func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	ctx, span := h.tracer.Start(context.Background(), "handler.ldapHandler.Bind")
 	defer span.End()
 
@@ -174,7 +177,7 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ld
 	return ldap.LDAPResultSuccess, nil
 }
 
-func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
+func (h *ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
 	ctx, span := h.tracer.Start(context.Background(), "handler.ldapHandler.Search")
 	defer span.End()
 
@@ -331,7 +334,7 @@ func (h ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn n
 	return ssr, nil
 }
 
-func (h ldapHandler) buildReqAttributesList(ctx context.Context, filter string, filters []string) []string {
+func (h *ldapHandler) buildReqAttributesList(ctx context.Context, filter string, filters []string) []string {
 	ctx, span := h.tracer.Start(ctx, "handler.ldapHandler.buildReqAttributesList")
 	defer span.End()
 
@@ -362,7 +365,7 @@ func (h ldapHandler) buildReqAttributesList(ctx context.Context, filter string, 
 }
 
 // Add is not yet supported for the ldap backend
-func (h ldapHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ldapHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	_, span := h.tracer.Start(context.Background(), "handler.ldapHandler.Add")
 	defer span.End()
 
@@ -377,7 +380,7 @@ func (h ldapHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (re
 }
 
 // Modify is not yet supported for the ldap backend
-func (h ldapHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ldapHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	_, span := h.tracer.Start(context.Background(), "handler.ldapHandler.Modify")
 	defer span.End()
 
@@ -394,7 +397,7 @@ func (h ldapHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Con
 }
 
 // Delete is not yet supported for the ldap backend
-func (h ldapHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ldapHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	_, span := h.tracer.Start(context.Background(), "handler.ldapHandler.Delete")
 	defer span.End()
 
@@ -410,24 +413,22 @@ func (h ldapHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (res
 	return ldap.LDAPResultInsufficientAccessRights, nil
 }
 
-func (h ldapHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (found bool, user config.User, err error) {
+func (h *ldapHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (found bool, user config.User, err error) {
 	_, span := h.tracer.Start(ctx, "handler.ldapHandler.FindUser")
 	defer span.End()
 	return false, config.User{}, nil
 }
 
-func (h ldapHandler) FindGroup(ctx context.Context, groupName string) (found bool, group config.Group, err error) {
+func (h *ldapHandler) FindGroup(ctx context.Context, groupName string) (found bool, group config.Group, err error) {
 	_, span := h.tracer.Start(ctx, "handler.ldapHandler.FindGroup")
 	defer span.End()
 
 	return false, config.Group{}, nil
 }
 
-func (h ldapHandler) Close(boundDn string, conn net.Conn) error {
+func (h *ldapHandler) Close(boundDn string, conn net.Conn) error {
 	conn.Close() // close connection to the server when then client is closed
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	delete(h.sessions, connID(conn))
+	h.sessions.Delete(connID(conn))
 	stats.Frontend.Add("closes", 1)
 	stats.Backend.Add("closes", 1)
 	return nil
@@ -465,50 +466,53 @@ func (h *ldapHandler) monitorServers() {
 	}()
 }
 
-func (h ldapHandler) getSession(conn net.Conn) (ldapSession, error) {
+func (h *ldapHandler) getSession(conn net.Conn) (ldapSession, error) {
 	id := connID(conn)
-	h.lock.Lock()
-	s, ok := h.sessions[id] // use server connection if it exists
-	h.lock.Unlock()
-	if !ok { // open a new server connection if not
-		var l *ldap.Conn
 
-		server, err := h.getBestServer() // pick the best server
-		if err != nil {
-			return ldapSession{}, err
+	// Try to get existing session
+	if sessionValue, ok := h.sessions.Load(id); ok {
+		if session, ok := sessionValue.(ldapSession); ok {
+			return session, nil
 		}
-
-		dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
-
-		switch server.Scheme {
-		case "ldaps":
-			tlsCfg := &tls.Config{}
-			if h.backend.Insecure {
-				tlsCfg.InsecureSkipVerify = true
-			}
-			l, err = ldap.DialTLS("tcp", dest, tlsCfg)
-		case "ldap":
-			l, err = ldap.Dial("tcp", dest)
-		}
-
-		if err != nil {
-			select {
-			case h.doPing <- true: // non-blocking send
-			default:
-			}
-			return ldapSession{}, err
-		}
-
-		s = ldapSession{id: id, c: conn, ldap: l}
-		h.lock.Lock()
-		h.sessions[s.id] = s
-		h.lock.Unlock()
 	}
+
+	// Create new server connection if session doesn't exist
+	var l *ldap.Conn
+
+	server, err := h.getBestServer() // pick the best server
+	if err != nil {
+		return ldapSession{}, err
+	}
+
+	dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+
+	switch server.Scheme {
+	case "ldaps":
+		tlsCfg := &tls.Config{}
+		if h.backend.Insecure {
+			tlsCfg.InsecureSkipVerify = true
+		}
+		l, err = ldap.DialTLS("tcp", dest, tlsCfg)
+	case "ldap":
+		l, err = ldap.Dial("tcp", dest)
+	}
+
+	if err != nil {
+		select {
+		case h.doPing <- true: // non-blocking send
+		default:
+		}
+		return ldapSession{}, err
+	}
+
+	s := ldapSession{id: id, c: conn, ldap: l}
+	h.sessions.Store(s.id, s)
 	return s, nil
 }
 
-func (h ldapHandler) ping() error {
+func (h *ldapHandler) ping() error {
 	healthy := false
+
 	for k, s := range h.servers {
 		var l *ldap.Conn
 		var err error
@@ -527,7 +531,7 @@ func (h ldapHandler) ping() error {
 		}
 
 		elapsed := time.Since(start)
-		h.lock.Lock()
+		h.serversLock.Lock()
 
 		if err != nil || l == nil {
 			h.log.Fatal().Str("hostname", s.Hostname).Int("port", s.Port).Err(err).Msg("server ping failed")
@@ -539,16 +543,16 @@ func (h ldapHandler) ping() error {
 			h.servers[k].Status = Up
 			l.Close() // prank caller
 		}
-		h.lock.Unlock()
+
+		h.serversLock.Unlock()
 	}
 
 	h.log.Debug().Interface("servers", h.servers).Msg("Server health")
-	b, err := json.Marshal(h.servers)
-	if err != nil {
-		h.log.Fatal().Err(err).Msg("error encoding tail data")
-	}
 
-	stats.Backend.Set("servers", stats.Stringer(string(b)))
+	// Use cached server status instead of marshaling every time
+	serverStatusJSON := h.getCachedServerStatus()
+	stats.Backend.Set("servers", stats.Stringer(serverStatusJSON))
+
 	if !healthy {
 		return fmt.Errorf("no healthy servers")
 	}
@@ -556,13 +560,14 @@ func (h ldapHandler) ping() error {
 	return nil
 }
 
-func (h ldapHandler) getBestServer() (ldapBackend, error) {
+func (h *ldapHandler) getBestServer() (ldapBackend, error) {
 	favorite := ldapBackend{}
 	forever, err := time.ParseDuration("30m")
 	if err != nil {
 		return ldapBackend{}, err
 	}
 
+	h.serversLock.RLock()
 	bestping := forever
 	for _, s := range h.servers {
 		if s.Status == Up && s.Ping < bestping {
@@ -570,6 +575,7 @@ func (h ldapHandler) getBestServer() (ldapBackend, error) {
 			bestping = s.Ping
 		}
 	}
+	h.serversLock.RUnlock()
 
 	if bestping == forever {
 		return ldapBackend{}, fmt.Errorf("no healthy servers found")
@@ -581,10 +587,58 @@ func (h ldapHandler) getBestServer() (ldapBackend, error) {
 
 // helper functions
 func connID(conn net.Conn) string {
-	h := sha256.New()
-	h.Write([]byte(conn.LocalAddr().String() + conn.RemoteAddr().String()))
-	sha := fmt.Sprintf("% x", h.Sum(nil))
-	return string(sha)
+	key := conn.LocalAddr().String() + conn.RemoteAddr().String()
+	return fmt.Sprintf("%x", xxhash.Sum64String(key))
+}
+
+// computeServerHash computes a fast hash of server status for change detection
+func (h *ldapHandler) computeServerHash() uint64 {
+	h.serversLock.RLock()
+	defer h.serversLock.RUnlock()
+
+	hash := xxhash.New()
+	for _, server := range h.servers {
+		fmt.Fprintf(hash, "%s:%d:%d:%d", server.Hostname, server.Port, server.Status, server.Ping)
+	}
+	return hash.Sum64()
+}
+
+// getCachedServerStatus returns cached JSON or computes and caches new JSON
+func (h *ldapHandler) getCachedServerStatus() string {
+	currentHash := h.computeServerHash()
+
+	h.serverStatusCache.mu.RLock()
+	if h.serverStatusCache.lastHash == currentHash && h.serverStatusCache.json != "" {
+		json := h.serverStatusCache.json
+		h.serverStatusCache.mu.RUnlock()
+		return json
+	}
+	h.serverStatusCache.mu.RUnlock()
+
+	// Need to recompute JSON
+	h.serverStatusCache.mu.Lock()
+	defer h.serverStatusCache.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if h.serverStatusCache.lastHash == currentHash && h.serverStatusCache.json != "" {
+		return h.serverStatusCache.json
+	}
+
+	// Compute new JSON
+	h.serversLock.RLock()
+	b, err := json.Marshal(h.servers)
+	h.serversLock.RUnlock()
+
+	if err != nil {
+		h.log.Error().Err(err).Msg("error encoding server status")
+		return "[]"
+	}
+
+	jsonStr := string(b)
+	h.serverStatusCache.json = jsonStr
+	h.serverStatusCache.lastHash = currentHash
+
+	return jsonStr
 }
 
 func parseURL(ldapurl string) (ldapBackend, error) {

@@ -35,24 +35,18 @@ type ownCloudHandler struct {
 	backend  config.Backend
 	log      *zerolog.Logger
 	client   *http.Client
-	sessions map[string]ownCloudSession
-	lock     *sync.Mutex
+	sessions sync.Map // for sessions - using sync.Map for better concurrency
 
 	monitor monitoring.MonitorInterface
 	tracer  trace.Tracer
 }
 
-// global lock for ownCloudHandler sessions & servers manipulation
-var ownCloudLock sync.Mutex
-
 func NewOwnCloudHandler(opts ...Option) Handler {
 	options := newOptions(opts...)
 
-	return ownCloudHandler{
-		backend:  options.Backend,
-		log:      options.Logger,
-		sessions: make(map[string]ownCloudSession),
-		lock:     &ownCloudLock,
+	return &ownCloudHandler{
+		backend: options.Backend,
+		log:     options.Logger,
 		client: &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -68,7 +62,7 @@ func NewOwnCloudHandler(opts ...Option) Handler {
 	}
 }
 
-func (h ownCloudHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ownCloudHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
@@ -112,16 +106,14 @@ func (h ownCloudHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (resul
 		useGraphAPI: h.backend.UseGraphAPI,
 		client:      h.client,
 	}
-	h.lock.Lock()
-	h.sessions[id] = s
-	h.lock.Unlock()
+	h.sessions.Store(id, s)
 
 	stats.Frontend.Add("bind_successes", 1)
 	h.log.Debug().Str("binddn", bindDN).Str("basedn", h.backend.BaseDN).Str("src", conn.RemoteAddr().String()).Msg("Bind success")
 	return ldap.LDAPResultSuccess, nil
 }
 
-func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
+func (h *ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, conn net.Conn) (result ldap.ServerSearchResult, err error) {
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
@@ -156,10 +148,15 @@ func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 		stats.Frontend.Add("search_failures", 1)
 		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, fmt.Errorf("search error: error parsing filter: %s", searchReq.Filter)
 	}
-	h.lock.Lock()
 	id := connID(conn)
-	session := h.sessions[id]
-	h.lock.Unlock()
+	sessionValue, ok := h.sessions.Load(id)
+	if !ok {
+		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("session not found")
+	}
+	session, ok := sessionValue.(ownCloudSession)
+	if !ok {
+		return ldap.ServerSearchResult{ResultCode: ldap.LDAPResultOperationsError}, errors.New("invalid session type")
+	}
 
 	switch filterEntity {
 	default:
@@ -229,7 +226,7 @@ func (h ownCloudHandler) Search(bindDN string, searchReq ldap.SearchRequest, con
 }
 
 // Add is not yet supported for the owncloud backend
-func (h ownCloudHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ownCloudHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
@@ -241,7 +238,7 @@ func (h ownCloudHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn)
 }
 
 // Modify is not yet supported for the owncloud backend
-func (h ownCloudHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ownCloudHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
@@ -253,7 +250,7 @@ func (h ownCloudHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net
 }
 
 // Delete is not yet supported for the owncloud backend
-func (h ownCloudHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
+func (h *ownCloudHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (result ldap.LDAPResultCode, err error) {
 	_, span := h.tracer.Start(context.Background(), "handler.configHandler.Delete")
 	defer span.End()
 
@@ -268,31 +265,29 @@ func (h ownCloudHandler) Delete(boundDN string, deleteDN string, conn net.Conn) 
 }
 
 // FindUser with the given username. Called by the ldap backend to authenticate the bind. Optional
-func (h ownCloudHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (found bool, user config.User, err error) {
+func (h *ownCloudHandler) FindUser(ctx context.Context, userName string, searchByUPN bool) (found bool, user config.User, err error) {
 	_, span := h.tracer.Start(ctx, "handler.ownCloudHandler.FindUser")
 	defer span.End()
 
 	return false, config.User{}, nil
 }
 
-func (h ownCloudHandler) FindGroup(ctx context.Context, groupName string) (found bool, group config.Group, err error) {
+func (h *ownCloudHandler) FindGroup(ctx context.Context, groupName string) (found bool, group config.Group, err error) {
 	_, span := h.tracer.Start(ctx, "handler.ownCloudHandler.FindGroup")
 	defer span.End()
 
 	return false, config.Group{}, nil
 }
 
-func (h ownCloudHandler) Close(boundDN string, conn net.Conn) error {
+func (h *ownCloudHandler) Close(boundDN string, conn net.Conn) error {
 	conn.Close() // close connection to the server when then client is closed
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	delete(h.sessions, connID(conn))
+	h.sessions.Delete(connID(conn))
 	stats.Frontend.Add("closes", 1)
 	stats.Backend.Add("closes", 1)
 	return nil
 }
 
-func (h ownCloudHandler) login(name, pw string) bool {
+func (h *ownCloudHandler) login(name, pw string) bool {
 	var req *http.Request
 	if h.backend.UseGraphAPI {
 		// TODO oc10 graphapi app should implement /me

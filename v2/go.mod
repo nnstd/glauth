@@ -10,6 +10,7 @@ require (
 	github.com/IGLOU-EU/go-wildcard/v2 v2.1.0
 	github.com/alecthomas/kong v1.12.0
 	github.com/arl/statsviz v0.6.0
+	github.com/cespare/xxhash v1.1.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/glauth/ldap v0.0.0-20240419171521-1f14f5c1b4ad
 	github.com/go-sql-driver/mysql v1.6.0
@@ -36,7 +37,6 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/boombuler/barcode v1.0.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
@@ -49,7 +49,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/msteinert/pam v1.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/common v0.65.0 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
