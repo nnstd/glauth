@@ -118,7 +118,7 @@ func (m *LDAPMonitorWatcher) storeMetrics() {
 
 	for key, value := range backendValues {
 		if err := m.monitor.SetLDAPMetric(map[string]string{"type": "backend_" + key}, float64(value)); err != nil {
-			m.logger.Error().Err(err).Msgf("failed to set backend_%s metric", key)
+			m.logger.Error().Err(err).Str("metric", "backend_"+key).Msg("failed to set backend metric")
 		}
 	}
 

@@ -151,7 +151,7 @@ func (h ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result ld
 	}
 
 	if !validotp {
-		h.log.Debug().Msg(fmt.Sprintf("Bind Error: invalid OTP token as %s from %s", bindDN, conn.RemoteAddr().String()))
+		h.log.Debug().Str("binddn", bindDN).Str("src", conn.RemoteAddr().String()).Msg("Bind Error: invalid OTP token")
 		return ldap.LDAPResultInvalidCredentials, nil
 	}
 

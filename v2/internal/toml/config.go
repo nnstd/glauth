@@ -72,6 +72,7 @@ func parseConfigFile(configFileLocation string, args map[string]interface{}) (*c
 		if !present {
 			return cfg, fmt.Errorf("invalid AWS region: %s", args["-r"])
 		}
+
 		if args["--aws_endpoint_url"] != nil {
 			region = aws.Region{
 				Name:       "User defined",
@@ -79,30 +80,36 @@ func parseConfigFile(configFileLocation string, args map[string]interface{}) (*c
 			}
 			present = true
 		}
+
 		auth, err := aws.EnvAuth()
 		if err != nil {
 			if args["-K"] == nil || args["-S"] == nil {
-				return cfg, fmt.Errorf("AWS credentials not found: must use -K and -S flags, or set these env vars:\n\texport AWS_ACCESS_KEY_ID=\"AAA...\"\n\texport AWS_SECRET_ACCESS_KEY=\"BBBB...\"\n")
+				return cfg, fmt.Errorf("AWS credentials not found: must use -K and -S flags, or set these env vars:\n\texport AWS_ACCESS_KEY_ID=\"AAA...\"\n\texport AWS_SECRET_ACCESS_KEY=\"BBBB...\"")
 			}
+
 			auth = aws.Auth{
 				AccessKey: args["-K"].(string),
 				SecretKey: args["-S"].(string),
 			}
 		}
+
 		// parse S3 url
 		s3url := strings.TrimPrefix(configFileLocation, "s3://")
 		parts := strings.SplitN(s3url, "/", 2)
 		if len(parts) != 2 {
 			return cfg, fmt.Errorf("invalid S3 URL: %s", s3url)
 		}
+
 		b, err := s3.New(auth, region).Bucket(parts[0])
 		if err != nil {
 			return cfg, err
 		}
+
 		tomlData, err := b.Get(parts[1])
 		if err != nil {
 			return cfg, err
 		}
+
 		if _, err := toml.Decode(string(tomlData), cfg); err != nil {
 			return cfg, err
 		}
@@ -250,22 +257,25 @@ func mergeConfigs(config1 interface{}, config2 interface{}) error {
 			if !ok {
 				return fmt.Errorf("config source: %s is not a map", keyName)
 			}
+
 			element1, ok := cfg1.(*map[string]interface{})
 			if !ok {
 				return fmt.Errorf("config dest: %s is not a map", keyName)
 			}
-			for k, _ := range element2 {
-				//fmt.Println(strings.Repeat("     ", depth), "  - key: ", k)
+
+			for k := range element2 {
 				_, ok := (*element1)[k]
+
 				if !ok {
 					(*element1)[k] = element2[k]
 				} else {
-					//fmt.Println(strings.Repeat("     ", depth), "  - merging: ", element2[k])
 					asanarrayptr, ok := (*element1)[k].([]map[string]interface{})
+
 					if ok {
 						if err := merger(depth+1, k, &asanarrayptr, element2[k]); err != nil {
 							return err
 						}
+
 						(*element1)[k] = asanarrayptr
 					} else {
 						asamapptr, ok := (*element1)[k].(map[string]interface{})
@@ -286,30 +296,30 @@ func mergeConfigs(config1 interface{}, config2 interface{}) error {
 			if !ok {
 				return fmt.Errorf("config source: %s is not a map array", keyName)
 			}
+
 			//fmt.Println(strings.Repeat("     ", depth), "  - element2: ", element2)
 			element1, ok := cfg1.(*[]map[string]interface{})
 			if !ok {
 				return fmt.Errorf("config dest: %s is not a map array", keyName)
 			}
+
 			//fmt.Println(strings.Repeat("     ", depth), "  - element1: ", element1)
-			for index, _ := range element2 {
-				*element1 = append(*element1, element2[index])
-			}
+			*element1 = append(*element1, element2...)
 		case string:
 			//fmt.Println(strings.Repeat("     ", depth), " - A string")
-			element2, ok := cfg2.(string)
+			_, ok := cfg2.(string)
 			if !ok {
 				return fmt.Errorf("config: %s is not a string", keyName)
 			}
 		case bool:
 			//fmt.Println(strings.Repeat("     ", depth), " - A boolean")
-			element2, ok := cfg2.(bool)
+			_, ok := cfg2.(bool)
 			if !ok {
 				return fmt.Errorf("config: %s is not a boolean value", keyName)
 			}
 		case float64:
 			//fmt.Println(strings.Repeat("     ", depth), " - A float64")
-			element2, ok := cfg2.(float64)
+			_, ok := cfg2.(float64)
 			if !ok {
 				return fmt.Errorf("config: %s is not a float64 value", keyName)
 			}
@@ -440,13 +450,14 @@ func validateConfig(cfg *config.Config) (*config.Config, error) {
 	for _, user := range cfg.Users {
 		if user.UnixID != 0 {
 			user.UIDNumber = user.UnixID
-			log.Info().Msg(fmt.Sprintf("User '%s': 'unixid' is deprecated - please move to 'uidnumber' as per documentation", user.Name))
+			log.Info().Str("user", user.Name).Msg("User 'unixid' is deprecated - please move to 'uidnumber' as per documentation")
 		}
 	}
+
 	for _, group := range cfg.Groups {
 		if group.UnixID != 0 {
 			group.GIDNumber = group.UnixID
-			log.Info().Msg(fmt.Sprintf("Group '%s': 'unixid' is deprecated - please move to 'gidnumber' as per documentation", group.Name))
+			log.Info().Str("group", group.Name).Msg("Group 'unixid' is deprecated - please move to 'gidnumber' as per documentation")
 		}
 	}
 

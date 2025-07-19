@@ -3,6 +3,7 @@ package stats
 import (
 	"expvar"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -134,29 +135,41 @@ func (rm *ResettableMap) String() string {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
-	result := "{"
+	// Pre-allocate buffer with estimated size to avoid multiple allocations
+	var buf strings.Builder
+	buf.WriteString("{")
+
 	first := true
 
 	// Add counter values
 	for key, counter := range rm.counters {
 		if !first {
-			result += ","
+			buf.WriteString(",")
 		}
-		result += `"` + key + `":` + counter.String()
+
+		buf.WriteString(`"`)
+		buf.WriteString(key)
+		buf.WriteString(`":`)
+		buf.WriteString(counter.String())
 		first = false
 	}
 
 	// Add string values
 	for key, strValue := range rm.stringValues {
 		if !first {
-			result += ","
+			buf.WriteString(",")
 		}
-		result += `"` + key + `":"` + strValue + `"`
+
+		buf.WriteString(`"`)
+		buf.WriteString(key)
+		buf.WriteString(`":"`)
+		buf.WriteString(strValue)
+		buf.WriteString(`"`)
 		first = false
 	}
 
-	result += "}"
-	return result
+	buf.WriteString("}")
+	return buf.String()
 }
 
 // exposed expvar variables

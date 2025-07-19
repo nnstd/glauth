@@ -26,14 +26,6 @@ func MakeTLS(clientCert, key []byte) (*tls.Config, error) {
 		return nil, err
 	}
 
-	log.Debug().Str("key", string(key))
-	log.Debug().Str("client.certificate", string(clientCert))
-	log.Debug().Interface("certificate", cert)
-
-	if err != nil {
-		return nil, err
-	}
-
 	// Get the SystemCertPool, continue with an empty pool on error
 	rootCAs, err := x509.SystemCertPool()
 
@@ -49,11 +41,11 @@ func MakeTLS(clientCert, key []byte) (*tls.Config, error) {
 		if err != nil {
 			log.Error().Err(err).Msg("issue parsing cert PEM")
 		}
+
 		rootCAs.AddCert(x509Cert)
 	}
 
-	log.Debug().Interface("root.ca", rootCAs)
-	log.Debug().Interface("certificates", []tls.Certificate{cert})
+	log.Debug().Bool("system_cert_pool", rootCAs != nil)
 
 	return &tls.Config{
 		RootCAs:      rootCAs,

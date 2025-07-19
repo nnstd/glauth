@@ -71,13 +71,13 @@ func NewDatabaseHandler(sqlBackend SqlBackend, opts ...handler.Option) handler.H
 		otelsql.WithDBName(options.Backend.Database),
 	)
 	if err != nil {
-		options.Logger.Error().Err(err).Msg(fmt.Sprintf("unable to open SQL database named '%s'", options.Backend.Database))
+		options.Logger.Error().Err(err).Str("database", options.Backend.Database).Msg("unable to open SQL database")
 		os.Exit(1)
 	}
 
 	err = db.Ping()
 	if err != nil {
-		options.Logger.Error().Err(err).Msg(fmt.Sprintf("unable to communicate with SQL database error: %s", options.Backend.Database))
+		options.Logger.Error().Err(err).Str("database", options.Backend.Database).Msg("unable to communicate with SQL database")
 		os.Exit(1)
 	}
 
