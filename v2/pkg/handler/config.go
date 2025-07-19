@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -305,7 +306,7 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 		}
 
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "ou", Values: []string{h.getGroupName(ctx, u.PrimaryGroup)}})
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "uidNumber", Values: []string{fmt.Sprintf("%d", u.UIDNumber)}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "uidNumber", Values: []string{strconv.Itoa(u.UIDNumber)}})
 
 		if u.Disabled {
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "accountStatus", Values: []string{"inactive"}})
@@ -334,7 +335,7 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{u.Name}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "gecos", Values: []string{u.Name}})
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", u.PrimaryGroup)}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{strconv.Itoa(u.PrimaryGroup)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "memberOf", Values: h.getGroupDNs(ctx, append(u.OtherGroups, u.PrimaryGroup))})
 
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "shadowExpire", Values: []string{"-1"}})
@@ -361,7 +362,7 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 						case string:
 							values = append(values, MaybeDecode(typedvalue))
 						default:
-							values = append(values, MaybeDecode(fmt.Sprintf("%v", typedvalue)))
+							values = append(values, MaybeDecode(strconv.FormatInt(int64(typedvalue.(int)), 10)))
 						}
 					}
 
@@ -372,14 +373,24 @@ func (h configHandler) FindPosixAccounts(ctx context.Context, hierarchy string) 
 			}
 		}
 
-		var dn string
+		// Use strings.Builder for efficient DN construction
+		var dn strings.Builder
+		dn.WriteString(h.backend.NameFormatAsArray[0])
+		dn.WriteString("=")
+		dn.WriteString(u.Name)
+		dn.WriteString(",")
+		dn.WriteString(h.backend.GroupFormatAsArray[0])
+		dn.WriteString("=")
+		dn.WriteString(h.getGroupName(ctx, u.PrimaryGroup))
 
-		if hierarchy == "" {
-			dn = fmt.Sprintf("%s=%s,%s=%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), h.backend.BaseDN)
-		} else {
-			dn = fmt.Sprintf("%s=%s,%s=%s,%s,%s", h.backend.NameFormatAsArray[0], u.Name, h.backend.GroupFormatAsArray[0], h.getGroupName(ctx, u.PrimaryGroup), hierarchy, h.backend.BaseDN)
+		if hierarchy != "" {
+			dn.WriteString(",")
+			dn.WriteString(hierarchy)
 		}
-		entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
+
+		dn.WriteString(",")
+		dn.WriteString(h.backend.BaseDN)
+		entries = append(entries, &ldap.Entry{DN: dn.String(), Attributes: attrs})
 	}
 
 	return entries, nil
@@ -404,7 +415,7 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 		}
 
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "description", Values: []string{g.Name}})
-		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{fmt.Sprintf("%d", g.GIDNumber)}})
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "gidNumber", Values: []string{strconv.Itoa(g.GIDNumber)}})
 		attrs = append(attrs, &ldap.EntryAttribute{Name: "uniqueMember", Values: h.getGroupMemberDNs(ctx, g.GIDNumber)})
 
 		if asGroupOfUniqueNames {
@@ -414,8 +425,16 @@ func (h configHandler) FindPosixGroups(ctx context.Context, hierarchy string) (e
 			attrs = append(attrs, &ldap.EntryAttribute{Name: "objectClass", Values: []string{"posixGroup", "top"}})
 		}
 
-		dn := fmt.Sprintf("%s=%s,%s,%s", h.backend.GroupFormatAsArray[0], g.Name, hierarchy, h.backend.BaseDN)
-		entries = append(entries, &ldap.Entry{DN: dn, Attributes: attrs})
+		// Use strings.Builder for efficient DN construction
+		var dn strings.Builder
+		dn.WriteString(h.backend.GroupFormatAsArray[0])
+		dn.WriteString("=")
+		dn.WriteString(g.Name)
+		dn.WriteString(",")
+		dn.WriteString(hierarchy)
+		dn.WriteString(",")
+		dn.WriteString(h.backend.BaseDN)
+		entries = append(entries, &ldap.Entry{DN: dn.String(), Attributes: attrs})
 	}
 
 	return entries, nil
@@ -570,8 +589,14 @@ func (h configHandler) getGroupDNs(ctx context.Context, gids []int) []string {
 	for _, gid := range gids {
 		for _, g := range h.cfg.Groups {
 			if g.GIDNumber == gid {
-				dn := fmt.Sprintf("%s=%s,ou=groups,%s", h.backend.GroupFormatAsArray[0], g.Name, h.backend.BaseDN)
-				groups[dn] = true
+				// Use strings.Builder for efficient DN construction
+				var dn strings.Builder
+				dn.WriteString(h.backend.GroupFormatAsArray[0])
+				dn.WriteString("=")
+				dn.WriteString(g.Name)
+				dn.WriteString(",ou=groups,")
+				dn.WriteString(h.backend.BaseDN)
+				groups[dn.String()] = true
 			}
 
 			for _, includegroupid := range g.IncludeGroups {

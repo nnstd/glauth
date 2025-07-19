@@ -106,8 +106,11 @@ func NewLdapHandler(opts ...Option) Handler {
 		handler.servers = append(handler.servers, l)
 
 		// Initialize connection pool for this server
-		serverKey := fmt.Sprintf("%s:%d", l.Hostname, l.Port)
-		handler.connPool.connections[serverKey] = make(chan *ldap.Conn, handler.connPool.maxPoolSize)
+		var serverKey strings.Builder
+		serverKey.WriteString(l.Hostname)
+		serverKey.WriteString(":")
+		serverKey.WriteString(strconv.Itoa(l.Port))
+		handler.connPool.connections[serverKey.String()] = make(chan *ldap.Conn, handler.connPool.maxPoolSize)
 	}
 
 	// test server connectivity before listening, then keep it updated
@@ -123,7 +126,7 @@ func (h *ldapHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (result l
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "bind", "status": fmt.Sprintf("%v", result)},
+			map[string]string{"operation": "bind", "status": strconv.FormatInt(int64(result), 10)},
 			time.Since(start).Seconds(),
 		)
 	}()
@@ -198,8 +201,10 @@ func (h *ldapHandler) Search(boundDN string, searchReq ldap.SearchRequest, conn 
 
 	start := time.Now()
 	defer func() {
+		status := strconv.FormatInt(int64(result.ResultCode), 10)
+
 		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "search", "status": fmt.Sprintf("%v", result.ResultCode)},
+			map[string]string{"operation": "search", "status": status},
 			time.Since(start).Seconds(),
 		)
 	}()
@@ -387,7 +392,7 @@ func (h *ldapHandler) Add(boundDN string, req ldap.AddRequest, conn net.Conn) (r
 	start := time.Now()
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "add", "status": fmt.Sprintf("%v", result)},
+			map[string]string{"operation": "add", "status": strconv.FormatInt(int64(result), 10)},
 			time.Since(start).Seconds(),
 		)
 	}()
@@ -403,7 +408,7 @@ func (h *ldapHandler) Modify(boundDN string, req ldap.ModifyRequest, conn net.Co
 
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "modify", "status": fmt.Sprintf("%v", result)},
+			map[string]string{"operation": "modify", "status": strconv.FormatInt(int64(result), 10)},
 			time.Since(start).Seconds(),
 		)
 	}()
@@ -420,7 +425,7 @@ func (h *ldapHandler) Delete(boundDN string, deleteDN string, conn net.Conn) (re
 
 	defer func() {
 		h.monitor.SetResponseTimeMetric(
-			map[string]string{"operation": "delete", "status": fmt.Sprintf("%v", result)},
+			map[string]string{"operation": "delete", "status": strconv.FormatInt(int64(result), 10)},
 			time.Since(start).Seconds(),
 		)
 	}()
@@ -599,12 +604,15 @@ func (h *ldapHandler) getBestServer() (ldapBackend, error) {
 // helper functions
 func connID(conn net.Conn) string {
 	key := conn.LocalAddr().String() + conn.RemoteAddr().String()
-	return fmt.Sprintf("%x", xxhash.Sum64String(key))
+	return strconv.FormatUint(xxhash.Sum64String(key), 16)
 }
 
 // createConnection creates a new LDAP connection to the specified server
 func (h *ldapHandler) createConnection(server ldapBackend) (*ldap.Conn, error) {
-	dest := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+	var dest strings.Builder
+	dest.WriteString(server.Hostname)
+	dest.WriteString(":")
+	dest.WriteString(strconv.Itoa(server.Port))
 
 	switch server.Scheme {
 	case "ldaps":
@@ -612,9 +620,9 @@ func (h *ldapHandler) createConnection(server ldapBackend) (*ldap.Conn, error) {
 		if h.backend.Insecure {
 			tlsCfg.InsecureSkipVerify = true
 		}
-		return ldap.DialTLS("tcp", dest, tlsCfg)
+		return ldap.DialTLS("tcp", dest.String(), tlsCfg)
 	case "ldap":
-		return ldap.Dial("tcp", dest)
+		return ldap.Dial("tcp", dest.String())
 	default:
 		return nil, fmt.Errorf("unsupported LDAP scheme: %s", server.Scheme)
 	}
@@ -622,10 +630,13 @@ func (h *ldapHandler) createConnection(server ldapBackend) (*ldap.Conn, error) {
 
 // getConnectionFromPool tries to get a connection from the pool, creates a new one if pool is empty
 func (h *ldapHandler) getConnectionFromPool(server ldapBackend) (*ldap.Conn, error) {
-	serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+	var serverKey strings.Builder
+	serverKey.WriteString(server.Hostname)
+	serverKey.WriteString(":")
+	serverKey.WriteString(strconv.Itoa(server.Port))
 
 	h.connPool.mu.RLock()
-	pool, exists := h.connPool.connections[serverKey]
+	pool, exists := h.connPool.connections[serverKey.String()]
 	h.connPool.mu.RUnlock()
 
 	if !exists {
@@ -657,10 +668,13 @@ func (h *ldapHandler) returnConnectionToPool(server ldapBackend, conn *ldap.Conn
 		return
 	}
 
-	serverKey := fmt.Sprintf("%s:%d", server.Hostname, server.Port)
+	var serverKey strings.Builder
+	serverKey.WriteString(server.Hostname)
+	serverKey.WriteString(":")
+	serverKey.WriteString(strconv.Itoa(server.Port))
 
 	h.connPool.mu.RLock()
-	pool, exists := h.connPool.connections[serverKey]
+	pool, exists := h.connPool.connections[serverKey.String()]
 	h.connPool.mu.RUnlock()
 
 	if !exists {
@@ -673,11 +687,11 @@ func (h *ldapHandler) returnConnectionToPool(server ldapBackend, conn *ldap.Conn
 	select {
 	case pool <- conn:
 		// Successfully returned to pool
-		h.log.Debug().Str("server", serverKey).Msg("Connection returned to pool")
+		h.log.Debug().Str("server", serverKey.String()).Msg("Connection returned to pool")
 	default:
 		// Pool is full, close connection
 		conn.Close()
-		h.log.Debug().Str("server", serverKey).Msg("Pool full, connection closed")
+		h.log.Debug().Str("server", serverKey.String()).Msg("Pool full, connection closed")
 	}
 }
 
