@@ -118,7 +118,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(increase(glauth_proxy_frontend{metric=\"bind_reqs\"}[$__range]))",
+          "expr": "sum(increase(glauth_proxy_frontend{metric=\"bind_reqs\",namespace=~\"$namespace\",instance=~\"$instance\"}[$__range]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "count",
@@ -218,7 +218,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(glauth_proxy_frontend{metric=\"bind_reqs\"})",
+          "expr": "sum(glauth_proxy_frontend{metric=\"bind_reqs\",namespace=~\"$namespace\",instance=~\"$instance\"})",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "count",
@@ -319,7 +319,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(glauth_proxy_frontend{metric=\"bind_failures\"})",
+          "expr": "sum(glauth_proxy_frontend{metric=\"bind_failures\",namespace=~\"$namespace\",instance=~\"$instance\"})",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "count",
@@ -391,7 +391,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(increase(glauth_proxy_frontend{metric=\"search_reqs\"}[$__range]))",
+          "expr": "sum(increase(glauth_proxy_frontend{metric=\"search_reqs\",namespace=~\"$namespace\",instance=~\"$instance\"}[$__range]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "count",
@@ -491,7 +491,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(glauth_proxy_frontend{metric=\"search_reqs\"})",
+          "expr": "sum(glauth_proxy_frontend{metric=\"search_reqs\",namespace=~\"$namespace\",instance=~\"$instance\"})",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "count",
@@ -592,7 +592,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(glauth_proxy_frontend{metric=\"search_successes\"})",
+          "expr": "sum(glauth_proxy_frontend{metric=\"search_successes\",namespace=~\"$namespace\",instance=~\"$instance\"})",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -695,7 +695,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(glauth_proxy_frontend{metric=\"search_failures\"})",
+          "expr": "sum(glauth_proxy_frontend{metric=\"search_failures\",namespace=~\"$namespace\",instance=~\"$instance\"})",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -727,6 +727,46 @@
         "refresh": 1,
         "regex": "",
         "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(glauth_proxy_frontend,namespace)",
+        "includeAll": true,
+        "label": "Namespace",
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(glauth_proxy_frontend,namespace)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(glauth_proxy_frontend,instance)",
+        "includeAll": true,
+        "label": "Instance",
+        "name": "instance",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(glauth_proxy_frontend,instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
       }
     ]
   },
@@ -738,6 +778,6 @@
   "timezone": "browser",
   "title": "GLAuth",
   "uid": "ceseenax2myv4d",
-  "version": 23,
+  "version": 29,
   "weekStart": ""
 }
